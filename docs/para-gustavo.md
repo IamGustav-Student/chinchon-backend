@@ -107,6 +107,28 @@ Cuando tengamos el ID de contenedor de GTM (formato `GTM-XXXXXXX`), avisanos par
 
 ---
 
+## Fase 4 — Sonidos, toasts y animaciones (solo frontend, sin cambios en backend)
+
+La Fase 4 fue 100% frontend. No requiere cambios en el backend. Sin embargo, hay un ítem de assets que necesita coordinación:
+
+### Archivos de audio requeridos
+
+El `AudioService` carga archivos desde `/assets/sounds/`. Hay que agregar estos clips en `chinchon-frontend/public/assets/sounds/`:
+
+| Archivo | Cuándo suena |
+|---|---|
+| `draw.mp3` | Jugador roba una carta |
+| `discard.mp3` | Jugador descarta una carta |
+| `your-turn.mp3` | Empieza el turno del jugador local |
+| `chinchon.mp3` | Alguien declara Chinchón |
+| `win.mp3` | El jugador local ganó |
+| `lose.mp3` | El jugador local perdió |
+| `join.mp3` | Un jugador se unió a la sala de espera |
+
+Clips cortos en MP3, < 1 segundo para acciones de juego, 2–3 segundos para win/lose/chinchon. Fuentes gratuitas recomendadas: freesound.org, mixkit.co, zapsplat.com.
+
+---
+
 ## Fase 2 — Página del juego en tiempo real
 
 ### 1. WebSocket — Eventos que el servidor debe emitir
