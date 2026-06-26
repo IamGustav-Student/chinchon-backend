@@ -6,13 +6,106 @@ Este archivo reúne todo lo que el backend necesita implementar o verificar para
 
 ## Fase 6 — Texas Hold'em (Cash Game)
 
+### Configuración de mesa (actualizado)
+
+| Parámetro | Valor |
+|---|---|
+| Máximo jugadores | **4** (fijo) |
+| Mínimo para iniciar la primera mano | **2** |
+| Unirse entre manos | ✅ sí, si hay lugar libre |
+| Buy-in | Fijo por nivel (ver tabla abajo) |
+| Recompras | Hasta 3 veces el buy-in |
+
+**Niveles de mesa:**
+
+| Buy-in | Blinds | Max jugadores |
+|---|---|---|
+| $500 | $5/$10 | 4 |
+| $1.000 | $10/$20 | 4 |
+| $5.000 | $50/$100 | 4 |
+| $25.000 | $250/$500 | 4 |
+
+---
+
 ### Concepto de buy-in fijo
 
 **Todos las mesas tienen buy-in fijo.** El jugador no elige cuánto llevar — compra exactamente el monto de la mesa. Esto nivela el campo y elimina la ventaja del "whale":
 
 - Al sentarse: se descuenta el buy-in de la billetera → se acreditan fichas a la mesa
 - Al salir: las fichas restantes se devuelven a la billetera
-- Si el jugador se queda sin fichas (bust): puede recomprar hasta `maxRebuys` veces el mismo monto
+- Si el jugador se queda sin fichas (bust): puede recomprar hasta 3 veces el mismo monto
+
+---
+
+### Side pots — Regla cuando los stacks son desiguales (IMPORTANTE)
+
+Este es el escenario clave: un jugador llega a la mesa y otros llevan tiempo jugando, por lo que sus stacks crecieron. **El que tiene menos fichas puede ir all-in y no queda fuera de la acción** — se crea un side pot.
+
+#### Cómo funciona:
+
+**Escenario concreto:**
+
+| Jugador | Stack al apostar |
+|---|---|
+| A (lleva mucho tiempo, ganó manos) | $3.000 |
+| B (lleva mucho tiempo) | $2.000 |
+| C (recién llegó) | $1.000 (buy-in fresco) |
+
+A apuesta todo → all-in por $3.000  
+B llama → $2.000 (todo lo que tiene)  
+C llama → $1.000 (todo lo que tiene)
+
+**Cálculo de pozos:**
+
+```
+Pozo principal (todos pueden ganar):
+  C aportó $1.000 × 3 jugadores = $3.000
+  → C puede ganar hasta $3.000
+
+Side pot 1 (solo A y B):
+  B aportó $1.000 extra × 2 jugadores = $2.000
+  → Solo A y B compiten por estos $2.000
+
+Side pot 2 (solo A):
+  A aportó $1.000 extra que nadie igualó → se devuelve $1.000 a A
+
+Total en juego: $5.000
+Devuelto a A: $1.000
+```
+
+**Regla general:** El pozo de cada jugador es su aportación × número de jugadores que igualaron o superaron ese monto. Lo que nadie puede igualar se devuelve.
+
+#### Qué debe hacer el backend:
+
+1. Cuando se produce un all-in, calcular los side pots inmediatamente
+2. Emitir `holdem-game-state` con el array `sidePots` actualizado:
+```json
+"sidePots": [
+  { "amount": 3000, "eligiblePlayerIds": [1, 2, 3] },
+  { "amount": 2000, "eligiblePlayerIds": [1, 2] }
+]
+```
+3. El excedente que nadie puede igualar se devuelve **antes del showdown**, no después
+4. En el showdown, evaluar cada pozo por separado:
+   - Pozo principal → ganador entre los 3 jugadores
+   - Side pot 1 → ganador entre A y B (C no puede ganarlo aunque tenga mejor mano)
+5. En `holdem-hand-end`, el array `winners` puede tener múltiples entradas (uno por pozo):
+```json
+"winners": [
+  { "playerId": 3, "amount": 3000, "hand": "Full House" },
+  { "playerId": 1, "amount": 2000, "hand": "Color" }
+]
+```
+
+#### Regla de unirse entre manos
+
+Cuando un jugador nuevo se une mientras otros ya tienen stacks grandes:
+- Recibe su buy-in fresco ($1.000 en una mesa de $1.000)
+- Puede hacer all-in por $1.000
+- Los otros jugadores con $3.000 pueden apostar hasta $1.000 efectivos contra él (el resto va a side pot entre ellos)
+- El sistema de side pots lo maneja automáticamente — **no hay restricción de cuánto puede apostar nadie**
+
+---
 
 **Niveles de mesa:**
 
