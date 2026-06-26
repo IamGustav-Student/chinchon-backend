@@ -4,6 +4,300 @@ Este archivo reúne todo lo que el backend necesita implementar o verificar para
 
 ---
 
+## Fase 6 — Texas Hold'em (Cash Game)
+
+### Concepto de buy-in fijo
+
+**Todos las mesas tienen buy-in fijo.** El jugador no elige cuánto llevar — compra exactamente el monto de la mesa. Esto nivela el campo y elimina la ventaja del "whale":
+
+- Al sentarse: se descuenta el buy-in de la billetera → se acreditan fichas a la mesa
+- Al salir: las fichas restantes se devuelven a la billetera
+- Si el jugador se queda sin fichas (bust): puede recomprar hasta `maxRebuys` veces el mismo monto
+
+**Niveles de mesa:**
+
+| Buy-in | Blinds | Max jugadores | Max recompras |
+|---|---|---|---|
+| $500 | $5/$10 | 2–6 | 3 |
+| $1.000 | $10/$20 | 2–6 | 3 |
+| $5.000 | $50/$100 | 2–6 | 3 |
+| $25.000 | $250/$500 | 2–6 | 3 |
+
+---
+
+### Endpoints REST requeridos
+
+```
+GET  /api/holdem/list
+```
+Lista de mesas activas (waiting o playing).
+
+```json
+[
+  {
+    "id": "table_uuid",
+    "buyIn": 1000,
+    "blindsSmall": 10,
+    "blindsBig": 20,
+    "maxPlayers": 6,
+    "playerCount": 2,
+    "status": "waiting",
+    "maxRebuys": 3
+  }
+]
+```
+
+---
+
+```
+GET  /api/holdem/:id
+```
+Detalle de una mesa con lista de jugadores.
+
+```json
+{
+  ...campos anteriores,
+  "players": [
+    { "id": 1, "username": "jugador", "avatar": "🦊", "stack": 1000 }
+  ]
+}
+```
+
+---
+
+```
+POST /api/holdem/create   { buyIn, maxPlayers }
+```
+Crea una nueva mesa. Descuenta el buy-in de la billetera del creador. Devuelve el objeto de la mesa.
+
+```
+POST /api/holdem/join/:id
+```
+Se une a la mesa. Descuenta el buy-in. Error si la mesa está llena o ya comenzó.
+
+```
+POST /api/holdem/:id/rebuy
+```
+Recompra fichas. Descuenta buy-in nuevamente. Solo válido si el jugador tiene stack=0 y le quedan recompras.
+
+---
+
+### Lógica del juego Hold'em
+
+El backend maneja el game engine completo de Texas Hold'em:
+- Baraja estándar de 52 cartas (sin jokers)
+- Cada mano: dealer rota, small blind + big blind postean automáticamente
+- Rondas: pre-flop → flop (3 cartas) → turn (1) → river (1)
+- En cada ronda de apuestas: acción de izquierda a derecha desde el que sigue al BB (pre-flop) o desde SB (post-flop)
+- Acciones disponibles: fold, check, call, raise, all-in
+- Side pots cuando hay all-in con stacks desiguales
+- Evaluación de manos al showdown (se puede usar la librería `pokersolver` o similar)
+
+**Nueva mano** se inicia automáticamente 4 segundos después de que termina la anterior, siempre que haya ≥ 2 jugadores con fichas.
+
+---
+
+### Eventos WebSocket — Naming: prefijo `holdem-`
+
+#### `holdem-game-state`
+Estado completo de la mesa. Se envía al conectarse y cuando hay cambios relevantes. **Las hole cards solo se incluyen para el jugador que las recibe** (envío personalizado).
+
+```json
+{
+  "id": "table_uuid",
+  "status": "waiting | playing | showdown | hand_end | finished",
+  "phase": "preflop | flop | turn | river | null",
+  "players": [
+    {
+      "id": 1,
+      "username": "jugador",
+      "avatar": "🦊",
+      "stack": 980,
+      "currentBet": 20,
+      "folded": false,
+      "isAllIn": false,
+      "seatIndex": 0,
+      "isDealer": false,
+      "isSmallBlind": false,
+      "isBigBlind": true,
+      "holeCards": [
+        { "suit": "spades", "value": 1 },
+        { "suit": "hearts", "value": 13 }
+      ],
+      "lastAction": "call"
+    }
+  ],
+  "communityCards": [],
+  "pot": 40,
+  "sidePots": [],
+  "currentTurn": 2,
+  "callAmount": 20,
+  "minRaise": 40,
+  "maxRaise": 980,
+  "buyIn": 1000,
+  "blindsSmall": 10,
+  "blindsBig": 20,
+  "maxRebuys": 3,
+  "rebuysLeft": 3
+}
+```
+
+Suits en inglés: `"spades"`, `"hearts"`, `"diamonds"`, `"clubs"`
+Values: 1=A, 2–10, 11=J, 12=Q, 13=K
+
+`holeCards` **solo va en el objeto del jugador que es el destinatario del mensaje**. Para los otros jugadores, omitir o enviar `null`.
+
+---
+
+#### `holdem-your-turn`
+Emitido al jugador cuyo turno comienza.
+```json
+{ "tableId": "table_uuid", "timeoutSeconds": 30 }
+```
+
+---
+
+#### `holdem-community-cards`
+Emitido cuando se reparten cartas comunitarias (flop, turn o river).
+```json
+{
+  "tableId": "table_uuid",
+  "phase": "flop | turn | river",
+  "cards": [
+    { "suit": "diamonds", "value": 7 },
+    { "suit": "clubs", "value": 3 },
+    { "suit": "hearts", "value": 11 }
+  ]
+}
+```
+
+---
+
+#### `holdem-action`
+Emitido a todos cuando un jugador actúa.
+```json
+{
+  "tableId": "table_uuid",
+  "playerId": 1,
+  "action": "fold | check | call | raise | allin",
+  "totalBet": 40,
+  "stack": 960,
+  "pot": 80,
+  "callAmount": 0,
+  "nextPlayerId": 2
+}
+```
+
+---
+
+#### `holdem-showdown`
+Emitido cuando todos los que quedan llegan al showdown.
+```json
+{ "tableId": "table_uuid" }
+```
+
+---
+
+#### `holdem-hand-end`
+Emitido al finalizar la mano. Incluye las cartas reveladas en el showdown.
+```json
+{
+  "tableId": "table_uuid",
+  "winners": [
+    { "playerId": 1, "amount": 200, "hand": "Full House, Reyes y Ases" }
+  ],
+  "showdownCards": [
+    {
+      "playerId": 1,
+      "cards": [{ "suit": "spades", "value": 13 }, { "suit": "hearts", "value": 13 }]
+    }
+  ],
+  "newStacks": { "1": 1200, "2": 800 }
+}
+```
+
+---
+
+#### `holdem-game-finished`
+La mesa se cerró (todos los jugadores se fueron o solo queda uno).
+```json
+{ "tableId": "table_uuid" }
+```
+Devolver las fichas de los jugadores a sus billeteras.
+
+---
+
+#### `holdem-player-joined` / `holdem-player-left`
+```json
+{ "tableId": "table_uuid", "playerId": 3, "username": "nuevo", "avatar": "🐯" }
+```
+
+---
+
+#### `holdem-error`
+```json
+{ "tableId": "table_uuid", "message": "No es tu turno" }
+```
+
+---
+
+### Eventos cliente → servidor (Hold'em)
+
+```
+holdem-join-table   { tableId }
+holdem-fold         { tableId }
+holdem-check        { tableId }
+holdem-call         { tableId }
+holdem-raise        { tableId, amount }
+holdem-allin        { tableId }
+```
+
+---
+
+### Timeout de turno
+
+Si el jugador no actúa en 30 segundos, el servidor hace fold automático (o check si es posible). Esto evita que la mesa quede trabada.
+
+---
+
+### Tabla de base de datos sugerida
+
+```sql
+CREATE TABLE holdem_tables (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  buy_in INTEGER NOT NULL,
+  blinds_small INTEGER NOT NULL,
+  blinds_big INTEGER NOT NULL,
+  max_players INTEGER NOT NULL DEFAULT 6,
+  max_rebuys INTEGER NOT NULL DEFAULT 3,
+  status VARCHAR(10) DEFAULT 'waiting',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE holdem_seats (
+  table_id UUID REFERENCES holdem_tables(id),
+  user_id INTEGER REFERENCES users(id),
+  seat_index INTEGER NOT NULL,
+  stack INTEGER NOT NULL,
+  rebuys_used INTEGER DEFAULT 0,
+  joined_at TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (table_id, user_id)
+);
+
+-- Las manos y estados del juego se pueden manejar en memoria (Redis o variable del proceso)
+-- y solo persistir el resultado final para historial.
+CREATE TABLE holdem_hands (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  table_id UUID REFERENCES holdem_tables(id),
+  winner_id INTEGER REFERENCES users(id),
+  pot INTEGER NOT NULL,
+  winning_hand VARCHAR(100),
+  played_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+---
+
 ## Fase 5 — Sistema de torneos semanales
 
 Torneos automáticos todos los **sábados a las 18:00 hs (ART = UTC-3)**.
