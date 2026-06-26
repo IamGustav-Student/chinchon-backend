@@ -4,6 +4,109 @@ Este archivo reúne todo lo que el backend necesita implementar o verificar para
 
 ---
 
+## Fase 3 — Infraestructura y despliegue
+
+El frontend ya está configurado para producción. Para que todo funcione end-to-end necesitamos lo siguiente del backend:
+
+---
+
+### 1. URL del backend en producción
+
+Cuando despliegues el backend, avisanos la URL final para actualizar `environment.production.ts` en el frontend si fuera necesario.
+
+El frontend está configurado así por defecto:
+- `apiUrl: '/api'` — asume que backend y frontend comparten el mismo dominio (Nginx/Cloudflare proxea `/api` hacia el backend en el puerto 3000)
+- `wsUrl: 'wss://<dominio>/ws'` — WebSocket en el mismo dominio con TLS
+
+Si el backend va en un **subdominio separado** (ej: `api.chinchononline.com`), avisanos para cambiar esas dos líneas.
+
+---
+
+### 2. Configuración de CORS
+
+En producción el backend debe aceptar requests únicamente desde el dominio del frontend. Actualizar la variable de entorno:
+
+```env
+CORS_ORIGIN=https://chinchononline.com
+```
+
+Si hay múltiples dominios (www + raíz), configurar el middleware de CORS para aceptar ambos:
+
+```javascript
+// cors.middleware.js o directamente en app.js
+const allowedOrigins = [
+  'https://chinchononline.com',
+  'https://www.chinchononline.com',
+];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) callback(null, true);
+    else callback(new Error('No permitido por CORS'));
+  },
+  credentials: true,
+}));
+```
+
+---
+
+### 3. WebSocket detrás de Cloudflare / Nginx
+
+Cloudflare soporta WebSocket en todos los planes sin configuración adicional. Solo asegurarse de:
+
+- Usar `wss://` (con TLS) en producción — el frontend ya lo hace.
+- Si se usa **Nginx como reverse proxy**, agregar los headers necesarios:
+
+```nginx
+location /ws {
+    proxy_pass http://localhost:3000;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_read_timeout 3600s;
+}
+
+location /api {
+    proxy_pass http://localhost:3000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+}
+```
+
+---
+
+### 4. Variables de entorno requeridas en producción
+
+```env
+PORT=3000
+NODE_ENV=production
+JWT_SECRET=<mínimo 64 caracteres aleatorios — usar openssl rand -base64 48>
+DB_URL=postgresql://user:pass@host:5432/chinchon
+CORS_ORIGIN=https://chinchononline.com
+```
+
+---
+
+### 5. Process manager (PM2)
+
+Para que el servidor sobreviva reinicios y crasheos, usar PM2:
+
+```bash
+npm install -g pm2
+pm2 start src/app.js --name chinchon-backend
+pm2 save
+pm2 startup   # configura el arranque automático con el sistema operativo
+```
+
+---
+
+### 6. Google Tag Manager
+
+Cuando tengamos el ID de contenedor de GTM (formato `GTM-XXXXXXX`), avisanos para descomentar el snippet en el `index.html` del frontend. Actualmente está comentado como placeholder.
+
+---
+
 ## Fase 2 — Página del juego en tiempo real
 
 ### 1. WebSocket — Eventos que el servidor debe emitir
