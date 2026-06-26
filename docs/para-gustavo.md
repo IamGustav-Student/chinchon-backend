@@ -4,6 +4,275 @@ Este archivo reúne todo lo que el backend necesita implementar o verificar para
 
 ---
 
+## Fase 5 — Sistema de torneos semanales
+
+Torneos automáticos todos los **sábados a las 18:00 hs (ART = UTC-3)**.
+
+### Reglas del negocio
+
+| Parámetro | Valor |
+|---|---|
+| Frecuencia | Todos los sábados a las 18:00 ART |
+| Inscripción | $1.000 virtuales por persona |
+| Mínimo de inscriptos | 8 (si no se alcanza, el torneo se cancela y se devuelve la inscripción) |
+| Tamaño de mesas | 3 o 4 jugadores (ver algoritmo de distribución) |
+| Eliminación | Continua — 1 ganador por mesa, avanza al siguiente round |
+| Reconexión | 50 segundos para reconectarse; si no vuelve, pierde por forfeit |
+| Premio campeón | 70% del pozo |
+| Premio finalista | 10% del pozo |
+| Comisión plataforma | 20% del pozo |
+| Inscripción cierra | 5 minutos antes de comenzar (17:55 ART) |
+| Inscripción abre | 24 horas antes (viernes 18:00 ART) |
+
+### Algoritmo de distribución de mesas (importante)
+
+Para evitar que jugadores en mesas de 2–3 tengan ventaja injusta, usar **exclusivamente mesas de 3 o 4** con esta fórmula:
+
+- `N % 4 == 0` → todo mesas de 4
+- `N % 4 == 1` → 3 mesas de 3 + el resto mesas de 4 (ej: 9 = 3×3)
+- `N % 4 == 2` → 2 mesas de 3 + el resto mesas de 4 (ej: 10 = 2×3 + 1×4)
+- `N % 4 == 3` → 1 mesa de 3 + el resto mesas de 4 (ej: 11 = 1×3 + 2×4)
+
+El número de ganadores del round 1 puede no ser múltiplo de 4; aplicar el mismo algoritmo recursivamente en cada round siguiente.
+
+**Ejemplo completo para 14 jugadores:**
+- Round 1: 2 mesas de 4 + 2 mesas de 3 → 4 ganadores
+- Round 2: 1 mesa de 4 → 1 campeón
+
+---
+
+### Endpoints REST requeridos
+
+```
+GET  /api/tournament/current
+```
+Devuelve el torneo próximo o en curso. Si no hay ninguno, devuelve `404`.
+
+```json
+{
+  "id": "t_uuid",
+  "status": "upcoming | registration_open | in_progress | finished | cancelled",
+  "startsAt": "2026-06-27T21:00:00.000Z",
+  "registrationDeadline": "2026-06-27T20:55:00.000Z",
+  "entryFee": 1000,
+  "registeredCount": 14,
+  "minPlayers": 8,
+  "isRegistered": true,
+  "prizePool": 14000,
+  "winnerPrize": 9800,
+  "finalistPrize": 1400
+}
+```
+
+`isRegistered` debe ser `true/false` según el usuario autenticado que hace el request.
+
+---
+
+```
+POST /api/tournament/register
+```
+Inscribe al usuario en el torneo actual (status `registration_open`). Descuenta $1.000 de la billetera. Devuelve error si:
+- El torneo no está en estado `registration_open`
+- El usuario ya está inscripto
+- El usuario no tiene saldo suficiente
+
+Respuesta: `{ "ok": true }`
+
+---
+
+```
+DELETE /api/tournament/register
+```
+Cancela la inscripción y devuelve los $1.000 a la billetera. Solo válido mientras el torneo esté en `registration_open`.
+
+Respuesta: `{ "ok": true }`
+
+---
+
+```
+GET /api/tournament/:id/bracket
+```
+Devuelve el bracket completo del torneo. `myMatchId` es el ID del match del usuario autenticado en el round actual (`null` si fue eliminado o si el torneo no comenzó).
+
+```json
+{
+  "tournamentId": "t_uuid",
+  "currentRound": 1,
+  "totalRounds": 2,
+  "myMatchId": "match_uuid_o_null",
+  "matches": [
+    {
+      "matchId": "match_uuid",
+      "round": 1,
+      "tableId": "table_uuid_o_null",
+      "players": [
+        { "id": 1, "username": "jugador1", "avatar": "🐯" },
+        { "id": 2, "username": "jugador2", "avatar": "🦁" }
+      ],
+      "winnerId": null,
+      "status": "pending | playing | finished"
+    }
+  ]
+}
+```
+
+---
+
+```
+GET /api/tournament/:id/result
+```
+Solo disponible cuando el torneo está en estado `finished`.
+
+```json
+{
+  "tournamentId": "t_uuid",
+  "winnerId": 7,
+  "winnerUsername": "campeón",
+  "finalistId": 12,
+  "finalistUsername": "finalista",
+  "prizePool": 14000,
+  "winnerPrize": 9800,
+  "finalistPrize": 1400,
+  "totalPlayers": 14
+}
+```
+
+---
+
+### Eventos WebSocket del torneo
+
+Todos los eventos del torneo deben enviarse **solo a los jugadores que están inscriptos** en ese torneo.
+
+#### `tournament-start`
+Se emite exactamente a las 18:00 cuando el torneo comienza. Si no se alcanzó el mínimo de 8 jugadores, emitir `tournament-cancelled` en su lugar.
+
+```json
+{ "tournamentId": "t_uuid", "totalPlayers": 14 }
+```
+
+#### `tournament-match-assigned`
+Se emite a cada jugador cuando se le asigna su mesa en el round actual.
+
+```json
+{
+  "tournamentId": "t_uuid",
+  "round": 1,
+  "matchId": "match_uuid",
+  "tableId": "table_uuid"
+}
+```
+
+El frontend navega automáticamente al juego cuando recibe este evento y el jugador toca "Ir a mi mesa".
+
+#### `tournament-round-end`
+Se emite cuando todas las mesas del round actual terminaron.
+
+```json
+{ "tournamentId": "t_uuid", "round": 1, "survivors": 4 }
+```
+
+Después de emitir este evento, crear las nuevas mesas del siguiente round y emitir `tournament-match-assigned` a los sobrevivientes.
+
+#### `tournament-finished`
+Se emite cuando el torneo termina (queda 1 ganador de la final).
+
+```json
+{
+  "tournamentId": "t_uuid",
+  "winnerId": 7,
+  "finalistId": 12
+}
+```
+
+Acreditar los premios automáticamente:
+- Ganador: +70% del pozo
+- Finalista: +10% del pozo
+- Los $1.000 × 20% quedan como comisión (no se devuelven)
+
+#### `tournament-cancelled`
+Se emite cuando no se alcanzó el mínimo y el torneo se cancela.
+
+```json
+{ "tournamentId": "t_uuid", "reason": "min_players_not_reached" }
+```
+
+Devolver los $1.000 a cada inscripto automáticamente.
+
+#### `tournament-disconnect-warning`
+Se emite **solo al jugador desconectado** cuando se detecta una desconexión durante su partida de torneo. El jugador tiene 50 segundos para reconectarse.
+
+```json
+{ "tournamentId": "t_uuid", "matchId": "match_uuid", "seconds": 50 }
+```
+
+Si no reconecta en 50 segundos, el servidor lo marca como perdedor del match y continúa el torneo.
+
+---
+
+### Cron job
+
+Usar `node-cron` o similar:
+
+```javascript
+// Todos los sábados a las 18:00 ART (UTC-3 = 21:00 UTC)
+cron.schedule('0 21 * * 6', () => {
+  startTournament();
+}, { timezone: 'America/Argentina/Buenos_Aires' });
+
+// Abrir inscripciones: viernes a las 18:00 ART
+cron.schedule('0 21 * * 5', () => {
+  openTournamentRegistration();
+}, { timezone: 'America/Argentina/Buenos_Aires' });
+
+// Cerrar inscripciones: sábado a las 17:55 ART (20:55 UTC)
+cron.schedule('55 20 * * 6', () => {
+  closeTournamentRegistration();
+}, { timezone: 'America/Argentina/Buenos_Aires' });
+```
+
+---
+
+### Tabla de base de datos sugerida
+
+```sql
+CREATE TABLE tournaments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  status VARCHAR(20) DEFAULT 'upcoming',
+  starts_at TIMESTAMPTZ NOT NULL,
+  registration_deadline TIMESTAMPTZ NOT NULL,
+  entry_fee INTEGER DEFAULT 1000,
+  prize_pool INTEGER DEFAULT 0,
+  winner_id INTEGER REFERENCES users(id),
+  finalist_id INTEGER REFERENCES users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE tournament_registrations (
+  tournament_id UUID REFERENCES tournaments(id),
+  user_id INTEGER REFERENCES users(id),
+  registered_at TIMESTAMPTZ DEFAULT NOW(),
+  eliminated_round INTEGER,
+  PRIMARY KEY (tournament_id, user_id)
+);
+
+CREATE TABLE tournament_matches (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tournament_id UUID REFERENCES tournaments(id),
+  round INTEGER NOT NULL,
+  table_id UUID REFERENCES game_tables(id),
+  winner_id INTEGER REFERENCES users(id),
+  status VARCHAR(10) DEFAULT 'pending'
+);
+
+CREATE TABLE tournament_match_players (
+  match_id UUID REFERENCES tournament_matches(id),
+  user_id INTEGER REFERENCES users(id),
+  PRIMARY KEY (match_id, user_id)
+);
+```
+
+---
+
 ## Fase 3 — Infraestructura y despliegue
 
 El frontend ya está configurado para producción. Para que todo funcione end-to-end necesitamos lo siguiente del backend:
