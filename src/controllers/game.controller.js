@@ -16,13 +16,15 @@ async function listTables(req, res) {
 
 async function createTable(req, res) {
   const { bet, maxPlayers, pointLimit } = req.body;
-  const validBets = [500, 1000, 2500, 5000, 10000];
+  const validBets = [0, 500, 1000, 2500, 5000, 10000];
   if (!validBets.includes(bet)) return res.status(400).json({ error: 'Apuesta inválida' });
   if (![2, 4].includes(maxPlayers)) return res.status(400).json({ error: 'Capacidad inválida' });
 
   try {
-    const balance = await db.query('SELECT balance FROM users WHERE id = $1', [req.user.id]);
-    if (balance.rows[0].balance < bet) return res.status(400).json({ error: 'Saldo insuficiente' });
+    if (bet > 0) {
+      const balance = await db.query('SELECT balance FROM users WHERE id = $1', [req.user.id]);
+      if (balance.rows[0].balance < bet) return res.status(400).json({ error: 'Saldo insuficiente' });
+    }
 
     const table = tableStore.create({
       id: uuidv4(),
@@ -46,8 +48,10 @@ async function joinTable(req, res) {
   if (table.players.includes(req.user.id)) return res.status(400).json({ error: 'Ya estás en esta mesa' });
 
   try {
-    const balance = await db.query('SELECT balance FROM users WHERE id = $1', [req.user.id]);
-    if (balance.rows[0].balance < table.bet) return res.status(400).json({ error: 'Saldo insuficiente' });
+    if (table.bet > 0) {
+      const balance = await db.query('SELECT balance FROM users WHERE id = $1', [req.user.id]);
+      if (balance.rows[0].balance < table.bet) return res.status(400).json({ error: 'Saldo insuficiente' });
+    }
 
     tableStore.addPlayer(table.id, req.user.id, req.user.username);
     res.json(tableStore.get(table.id));

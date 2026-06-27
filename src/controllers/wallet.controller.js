@@ -10,9 +10,28 @@ async function getBalance(req, res) {
 }
 
 async function deposit(req, res) {
-  const { amount } = req.body;
+  const { amount, senderName, senderBank, transactionId } = req.body;
   if (!amount || amount <= 0) return res.status(400).json({ error: 'Monto inválido' });
+  if (!senderName || !senderBank || !transactionId)
+    return res.status(400).json({ error: 'Faltan datos del comprobante' });
+
   try {
+    const userResult = await db.query('SELECT username FROM users WHERE id = $1', [req.user.id]);
+    const username = userResult.rows[0]?.username;
+    const nameMatches = senderName.trim().toLowerCase() === username?.toLowerCase();
+
+    await db.query(
+      `INSERT INTO deposit_requests (user_id, amount, sender_name, sender_bank, transaction_id, approved)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [req.user.id, amount, senderName.trim(), senderBank.trim(), transactionId.trim(), nameMatches]
+    );
+
+    if (!nameMatches) {
+      return res.status(422).json({
+        error: 'El nombre del titular no coincide con el usuario registrado. El depósito quedó pendiente de revisión.',
+      });
+    }
+
     const result = await db.query(
       `UPDATE users SET balance = balance + $1 WHERE id = $2 RETURNING balance`,
       [amount, req.user.id]

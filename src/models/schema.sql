@@ -5,8 +5,8 @@ CREATE TABLE IF NOT EXISTS users (
   username      VARCHAR(50) UNIQUE NOT NULL,
   email         VARCHAR(255) UNIQUE NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
-  avatar        VARCHAR(100) DEFAULT 'avatar-1',
-  balance       INTEGER DEFAULT 10000,
+  avatar        TEXT DEFAULT 'avatar-1',
+  balance       INTEGER DEFAULT 0,
   games_played  INTEGER DEFAULT 0,
   games_won     INTEGER DEFAULT 0,
   games_lost    INTEGER DEFAULT 0,
@@ -86,6 +86,17 @@ CREATE TABLE IF NOT EXISTS holdem_hands (
   played_at    TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS deposit_requests (
+  id             SERIAL PRIMARY KEY,
+  user_id        INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  amount         INTEGER NOT NULL,
+  sender_name    VARCHAR(255) NOT NULL,
+  sender_bank    VARCHAR(100) NOT NULL,
+  transaction_id VARCHAR(100) NOT NULL,
+  approved       BOOLEAN NOT NULL DEFAULT false,
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Índices
 CREATE INDEX IF NOT EXISTS idx_wallet_history_user ON wallet_history(user_id);
 CREATE INDEX IF NOT EXISTS idx_weekly_ranking_week ON weekly_ranking(week_start);
@@ -103,5 +114,12 @@ BEGIN
       'tournament-entry', 'tournament-refund', 'tournament-win', 'tournament-finalist',
       'holdem-buyin', 'holdem-cashout'
     ));
+EXCEPTION WHEN others THEN NULL;
+END$$;
+
+-- Migración: cambiar avatar a TEXT para soportar base64
+DO $$
+BEGIN
+  ALTER TABLE users ALTER COLUMN avatar TYPE TEXT;
 EXCEPTION WHEN others THEN NULL;
 END$$;

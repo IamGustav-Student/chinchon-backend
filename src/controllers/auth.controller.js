@@ -3,7 +3,7 @@ const jwt = require('jsonwebtoken');
 const db = require('../models/db');
 
 const WEEKLY_PRIZES = [280000, 230000, 180000, 120000, 90000, 80000, 70000, 60000, 50000, 40000];
-const INITIAL_BALANCE = 10000;
+const INITIAL_BALANCE = 0;
 
 async function register(req, res) {
   const { username, email, password } = req.body;
