@@ -1,9 +1,12 @@
 const WebSocket = require('ws');
 const jwt = require('jsonwebtoken');
 const tableStore = require('../models/table.store');
+const tournamentStore = require('../models/tournament.store');
 const engine = require('../game/chinchon.engine');
+const db = require('../models/db');
+const gameEvents = require('../events/game.events');
 
-// Mapa de conexiones: userId -> ws
+// userId -> ws
 const connections = new Map();
 
 function initWebSocket(server) {
@@ -23,6 +26,10 @@ function initWebSocket(server) {
     connections.set(user.id, ws);
     ws.userId = user.id;
     ws.username = user.username;
+
+    // Si el jugador tenía un timer de forfeit de torneo, cancelarlo al reconectar
+    const { handleTournamentReconnect } = require('../tournament/tournament.scheduler');
+    handleTournamentReconnect(user.id);
 
     ws.on('message', (raw) => {
       try {
@@ -62,6 +69,19 @@ function handleJoinTable(ws, user, { tableId }) {
   if (!table) return send(ws, { event: 'error', data: { message: 'Mesa no encontrada' } });
 
   ws.tableId = tableId;
+
+  // Si la partida ya está en curso (jugador reconectado o llegó tarde en torneo)
+  if (table.status === 'playing') {
+    send(ws, {
+      event: 'game-start',
+      data: { ...publicState(table, user.id), hand: table.hands[user.id] ?? [] },
+    });
+    if (table.currentTurn === user.id) {
+      send(ws, { event: 'your-turn', data: { tableId: table.id } });
+    }
+    return;
+  }
+
   broadcast(table, { event: 'player-joined', data: { userId: user.id, username: user.username } });
 
   if (table.players.length === table.maxPlayers && table.status === 'waiting') {
@@ -86,15 +106,34 @@ function startGame(table) {
     round: 1,
   });
 
+  // Descontar apuestas (solo si bet > 0, mesas normales)
+  if (updated.bet > 0) {
+    deductBets(updated).catch(err => console.error('Error descontando apuestas:', err));
+  }
+
   broadcastAll(updated, (userId) => ({
     event: 'game-start',
-    data: {
-      ...publicState(updated, userId),
-      hand: updated.hands[userId],
-    },
+    data: { ...publicState(updated, userId), hand: updated.hands[userId] },
   }));
 
   notifyTurn(updated);
+}
+
+async function deductBets(table) {
+  try {
+    await db.query('BEGIN');
+    for (const pid of table.players) {
+      await db.query('UPDATE users SET balance = balance - $1 WHERE id = $2', [table.bet, pid]);
+      await db.query(
+        'INSERT INTO wallet_history (user_id, type, amount) VALUES ($1, $2, $3)',
+        [pid, 'game-loss', -table.bet]
+      );
+    }
+    await db.query('COMMIT');
+  } catch (err) {
+    await db.query('ROLLBACK').catch(() => {});
+    console.error('Error en deductBets:', err);
+  }
 }
 
 function handleDrawCard(ws, user, { tableId, source }) {
@@ -112,7 +151,6 @@ function handleDrawCard(ws, user, { tableId, source }) {
     card = updatedDiscard.pop();
   } else {
     if (updatedDeck.length === 0) {
-      // Reiniciar mazo con el descarte
       const last = updatedDiscard.pop();
       updatedDeck = engine.createDeck().filter(
         c => !updatedDiscard.some(d => d.suit === c.suit && d.value === c.value)
@@ -170,12 +208,11 @@ function handleDeclareChinchon(ws, user, { tableId }) {
   }
 
   const scores = { ...table.scores };
+  scores[user.id] = (scores[user.id] || 0) - 10;
   for (const pid of table.players) {
     if (pid !== user.id) {
       scores[pid] += table.hands[pid].reduce((s, c) => s + c.points, 0);
     }
-    // El que hace Chinchón suma -10 puntos (bonificación)
-    scores[user.id] = (scores[user.id] || 0) - 10;
   }
 
   endRound(table, scores, user.id, 'chinchon');
@@ -195,7 +232,6 @@ function handleCut(ws, user, { tableId }) {
 
   const scores = { ...table.scores };
   scores[user.id] = (scores[user.id] || 0) + result.points;
-
   for (const pid of table.players) {
     if (pid !== user.id) {
       scores[pid] += table.hands[pid].reduce((s, c) => s + c.points, 0);
@@ -220,7 +256,6 @@ function endRound(table, scores, winnerId, type) {
     const gameWinner = remaining[0] || table.players.reduce((a, b) => scores[a] < scores[b] ? a : b);
     endGame(updated, gameWinner, scores);
   } else {
-    // Nueva ronda
     setTimeout(() => startNewRound(updated, remaining, scores), 3000);
   }
 }
@@ -250,12 +285,53 @@ function startNewRound(table, players, scores) {
 
 function endGame(table, winnerId, scores) {
   tableStore.update(table.id, { status: 'finished' });
-  broadcast(table, {
-    event: 'game-over',
-    data: { winner: winnerId, scores },
-  });
-  // Eliminar mesa después de 30 segundos
+  broadcast(table, { event: 'game-over', data: { winner: winnerId, scores } });
+
+  // Actualizar estadísticas y billetera en partidas normales (bet > 0)
+  if (table.bet > 0) {
+    resolveGameFinances(table, winnerId).catch(err => console.error('Error en resolveGameFinances:', err));
+  }
+
+  // Emitir evento para que el scheduler de torneo reaccione
+  gameEvents.emit('game-over', { tableId: table.id, winnerId });
+
   setTimeout(() => tableStore.remove(table.id), 30000);
+}
+
+async function resolveGameFinances(table, winnerId) {
+  const prize = table.bet * table.players.length;
+  const weekStart = getWeekStart();
+
+  try {
+    await db.query('BEGIN');
+
+    // Acreditar premio al ganador (el entry ya fue deducido en startGame)
+    await db.query('UPDATE users SET balance = balance + $1, games_played = games_played + 1, games_won = games_won + 1 WHERE id = $2', [prize, winnerId]);
+    await db.query(
+      'INSERT INTO wallet_history (user_id, type, amount) VALUES ($1, $2, $3)',
+      [winnerId, 'game-win', prize]
+    );
+
+    // Actualizar stats de losers
+    for (const pid of table.players) {
+      if (pid === winnerId) continue;
+      await db.query('UPDATE users SET games_played = games_played + 1, games_lost = games_lost + 1 WHERE id = $1', [pid]);
+    }
+
+    // Ranking semanal del ganador
+    await db.query(
+      `INSERT INTO weekly_ranking (user_id, points, earnings, week_start)
+       VALUES ($1, 1, $2, $3)
+       ON CONFLICT (user_id, week_start) DO UPDATE
+       SET points = weekly_ranking.points + 1, earnings = weekly_ranking.earnings + $2`,
+      [winnerId, prize - table.bet, weekStart]
+    );
+
+    await db.query('COMMIT');
+  } catch (err) {
+    await db.query('ROLLBACK').catch(() => {});
+    console.error('Error en resolveGameFinances:', err);
+  }
 }
 
 function handleDisconnect(userId) {
@@ -264,9 +340,14 @@ function handleDisconnect(userId) {
       broadcast(table, { event: 'player-disconnected', data: { userId } });
     }
   }
+
+  // Notificar al scheduler de torneo si aplica
+  const { handleTournamentDisconnect } = require('../tournament/tournament.scheduler');
+  handleTournamentDisconnect(userId);
 }
 
-// Estado público de la mesa (sin mostrar manos ajenas)
+// ── Utilidades ──────────────────────────────────────────────────────────────
+
 function publicState(table, forUserId) {
   return {
     id: table.id,
@@ -291,9 +372,28 @@ function nextPlayer(table) {
   return table.players[(idx + 1) % table.players.length];
 }
 
+function getWeekStart() {
+  const now = new Date();
+  const day = now.getUTCDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  const monday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + diff));
+  return monday.toISOString().split('T')[0];
+}
+
 function send(ws, payload) {
   if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(payload));
+  }
+}
+
+function sendToUser(userId, payload) {
+  const ws = connections.get(userId);
+  if (ws) send(ws, payload);
+}
+
+function broadcastToAll(payload) {
+  for (const [, ws] of connections) {
+    send(ws, payload);
   }
 }
 
@@ -317,4 +417,4 @@ function notifyTurn(table) {
   if (ws) send(ws, { event: 'your-turn', data: { tableId: table.id } });
 }
 
-module.exports = { initWebSocket };
+module.exports = { initWebSocket, sendToUser, broadcastToAll };
