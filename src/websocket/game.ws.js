@@ -5,6 +5,7 @@ const tournamentStore = require('../models/tournament.store');
 const engine = require('../game/chinchon.engine');
 const db = require('../models/db');
 const gameEvents = require('../events/game.events');
+const holdemWs = require('./holdem.ws');
 
 // userId -> ws
 const connections = new Map();
@@ -53,6 +54,9 @@ function getTokenFromRequest(req) {
 }
 
 function handleMessage(ws, user, { event, data }) {
+  if (event.startsWith('holdem-')) {
+    return holdemWs.handleHoldemMessage(ws, user, event, data || {});
+  }
   switch (event) {
     case 'join-table':       return handleJoinTable(ws, user, data);
     case 'draw-card':        return handleDrawCard(ws, user, data);
@@ -344,6 +348,9 @@ function handleDisconnect(userId) {
   // Notificar al scheduler de torneo si aplica
   const { handleTournamentDisconnect } = require('../tournament/tournament.scheduler');
   handleTournamentDisconnect(userId);
+
+  // Notificar hold'em
+  holdemWs.handleHoldemDisconnect(userId);
 }
 
 // ── Utilidades ──────────────────────────────────────────────────────────────

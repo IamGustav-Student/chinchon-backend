@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS wallet_history (
   type       VARCHAR(30) NOT NULL CHECK (type IN (
     'deposit', 'withdraw',
     'game-win', 'game-loss',
-    'tournament-entry', 'tournament-refund', 'tournament-win', 'tournament-finalist'
+    'tournament-entry', 'tournament-refund', 'tournament-win', 'tournament-finalist',
+    'holdem-buyin', 'holdem-cashout'
   )),
   amount     INTEGER NOT NULL,
   created_at TIMESTAMP DEFAULT NOW()
@@ -65,6 +66,26 @@ CREATE TABLE IF NOT EXISTS tournament_registrations (
   PRIMARY KEY (tournament_id, user_id)
 );
 
+CREATE TABLE IF NOT EXISTS holdem_tables (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  buy_in      INTEGER NOT NULL,
+  blinds_small INTEGER NOT NULL,
+  blinds_big   INTEGER NOT NULL,
+  max_players  INTEGER NOT NULL DEFAULT 4,
+  max_rebuys   INTEGER NOT NULL DEFAULT 3,
+  status       VARCHAR(10) DEFAULT 'waiting',
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS holdem_hands (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  table_id     UUID,
+  winner_id    INTEGER REFERENCES users(id),
+  pot          INTEGER NOT NULL,
+  winning_hand VARCHAR(100),
+  played_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Índices
 CREATE INDEX IF NOT EXISTS idx_wallet_history_user ON wallet_history(user_id);
 CREATE INDEX IF NOT EXISTS idx_weekly_ranking_week ON weekly_ranking(week_start);
@@ -79,7 +100,8 @@ BEGIN
     CHECK (type IN (
       'deposit', 'withdraw',
       'game-win', 'game-loss',
-      'tournament-entry', 'tournament-refund', 'tournament-win', 'tournament-finalist'
+      'tournament-entry', 'tournament-refund', 'tournament-win', 'tournament-finalist',
+      'holdem-buyin', 'holdem-cashout'
     ));
 EXCEPTION WHEN others THEN NULL;
 END$$;

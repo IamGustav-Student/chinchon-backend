@@ -11,6 +11,7 @@ const profileRoutes = require('./routes/profile.routes');
 const rankingRoutes = require('./routes/ranking.routes');
 const walletRoutes = require('./routes/wallet.routes');
 const tournamentRoutes = require('./routes/tournament.routes');
+const holdemRoutes = require('./routes/holdem.routes');
 
 const app = express();
 const server = http.createServer(app);
@@ -24,12 +25,16 @@ app.use('/api/perfil', profileRoutes);
 app.use('/api/ranking', rankingRoutes);
 app.use('/api/wallet', walletRoutes);
 app.use('/api/tournament', tournamentRoutes);
+app.use('/api/holdem', holdemRoutes);
 
 app.get('/api/ping', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+const holdemWs = require('./websocket/holdem.ws');
+
 initWebSocket(server);
+holdemWs.init(sendToUser, broadcastToAll);
 tournamentScheduler.init(sendToUser, broadcastToAll);
 
 const PORT = process.env.PORT || 3000;
