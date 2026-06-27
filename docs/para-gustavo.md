@@ -4,6 +4,268 @@ Este archivo reúne todo lo que el backend necesita implementar o verificar para
 
 ---
 
+## Fase 7 — Truco Argentino
+
+### Descripción general
+
+Juego de cartas argentino en tiempo real. Mesas de **2 jugadores** (mano a mano) o **4 jugadores** (parejas). Usa el mismo mazo español que Chinchón (oro, copa, basto, espada — valores 1-7, 10, 11, 12).
+
+---
+
+### Endpoints REST
+
+```
+GET  /api/truco/list
+POST /api/truco/create   { buyIn, maxPlayers: 2|4, pointLimit: 15|30 }
+POST /api/truco/join/:id
+```
+
+**GET /api/truco/list** — devuelve mesas activas:
+```json
+[{ "id": "uuid", "buyIn": 500, "maxPlayers": 4, "playerCount": 2, "status": "waiting", "pointLimit": 15 }]
+```
+
+**POST /api/truco/create** — descuenta buyIn de la billetera, devuelve la mesa creada.
+
+**POST /api/truco/join/:id** — solo si hay lugar y `status === 'waiting'`. Devuelve `{ tableId }`.
+
+---
+
+### Equipos (mesas de 4)
+
+Los jugadores se dividen en dos equipos por orden de llegada:
+- `seatIndex 0, 2` → `teamIndex: 0`
+- `seatIndex 1, 3` → `teamIndex: 1`
+
+Los compañeros se sientan uno frente al otro.
+
+---
+
+### Reglas del Truco Argentino
+
+#### Mazo
+- 40 cartas: palos oro, copa, basto, espada — valores 1-7, 10 (sota), 11 (caballo), 12 (rey)
+- Sin 8 ni 9
+
+#### Jerarquía de cartas para el Truco (de mayor a menor)
+1. 1 de espada (ancho de espada)
+2. 1 de basto
+3. 7 de espada
+4. 7 de oro
+5. 3 (cualquier palo — todos iguales)
+6. 2 (cualquier palo)
+7. 1 de oro · 1 de copa (iguales entre sí)
+8. 12 (rey, cualquier palo)
+9. 11 (caballo)
+10. 10 (sota)
+11. 7 de copa · 7 de basto
+12. 6 (cualquier palo)
+13. 5
+14. 4
+
+#### Puntos de Envido
+- Cartas del mismo palo: 20 + suma de los dos valores más altos del palo (10/11/12 valen 0)
+- Sin dos cartas del mismo palo: valor de la carta más alta
+
+#### Estructura de una mano
+1. Se reparten 3 cartas a cada jugador
+2. Fase de envido (antes o durante la primera baza)
+3. Fase de truco (durante el juego)
+4. 3 bazas — gana quien gana 2 de 3
+5. Empate en primera baza → decide la segunda; empate en ambas → gana el "mano"
+
+#### "Mano"
+El jugador con la mano actúa primero. Rota al siguiente jugador en sentido horario cada mano.
+
+#### Cantos de Envido
+Solo se pueden cantar antes o durante la primera baza.
+
+| Canto | Si quiero | Si no quiero |
+|---|---|---|
+| Envido | 2 pts | 1 pt al cantador |
+| Envido + Envido | 4 pts | 1 pt |
+| Real Envido | 3 pts | 1 pt |
+| Falta Envido | lo que falta para llegar al límite | 1 pt |
+
+Subidas válidas: Envido → Envido · Real Envido · Falta Envido; Real Envido → Falta Envido
+
+#### Cantos de Truco
+| Canto | Si quiero | Si no quiero |
+|---|---|---|
+| Truco | 2 pts | 1 pt al cantador |
+| Retruco | 3 pts | 2 pts al cantador |
+| Vale Cuatro | 4 pts | 3 pts al cantador |
+
+#### Irse al mazo
+El jugador cede la mano. Si no había truco cantado, el equipo pierde 1 punto. Si había truco, pierde lo que corresponda al rechazo.
+
+#### Puntos al ganar la partida
+Si `buyIn > 0`, el equipo ganador recibe `buyIn × 2` (para los 2 de una pareja de 4, `buyIn × 4` total del pozo). El 20% es comisión de plataforma (igual que torneos y Hold'em).
+
+---
+
+### Señas entre compañeros (mesas de 4 — PRIVADAS)
+
+Cuando un jugador envía una seña, el servidor la reenvía ÚNICAMENTE al compañero (mismo `teamIndex`, distinto `id`). Los rivales NO reciben este evento.
+
+**Evento cliente → servidor:** `truco-partner-signal`
+```json
+{ "event": "truco-partner-signal", "data": { "signal": "tengo-envido" } }
+```
+
+**Evento servidor → compañero:** `truco-partner-signal`
+```json
+{ "event": "truco-partner-signal", "data": { "signal": "tengo-envido" } }
+```
+
+Señas válidas: `tengo-envido`, `falta-envido`, `sin-envido`, `buenas`, `malas`, `voy`, `pongo`, `truco`, `quiero`, `no`
+
+---
+
+### Eventos WebSocket — prefijo `truco-`
+
+#### Cliente → servidor
+
+| Evento | Datos |
+|---|---|
+| `truco-join-table` | `{ tableId }` |
+| `truco-play-card` | `{ suit, value }` |
+| `truco-envido` | `{}` |
+| `truco-envido-envido` | `{}` |
+| `truco-real-envido` | `{}` |
+| `truco-falta-envido` | `{}` |
+| `truco-truco` | `{}` |
+| `truco-retruco` | `{}` |
+| `truco-vale-cuatro` | `{}` |
+| `truco-quiero` | `{}` |
+| `truco-no-quiero` | `{}` |
+| `truco-irse-al-mazo` | `{}` |
+| `truco-partner-signal` | `{ signal }` |
+
+#### Servidor → cliente
+
+**`truco-game-state`** — Estado completo. Se envía al conectarse, al inicio de cada mano, y tras cada acción. Las cartas propias (`myCards`) solo van al jugador dueño.
+
+```json
+{
+  "event": "truco-game-state",
+  "data": {
+    "tableId": "uuid",
+    "status": "waiting | playing | finished",
+    "maxPlayers": 4,
+    "buyIn": 500,
+    "pointLimit": 15,
+    "players": [
+      {
+        "id": 1,
+        "username": "pepe",
+        "avatar": "🦊",
+        "teamIndex": 0,
+        "seatIndex": 0,
+        "isMano": true,
+        "cardCount": 3,
+        "cardPlayed": null,
+        "lastAction": null
+      }
+    ],
+    "myCards": [
+      { "suit": "espada", "value": 1, "played": false },
+      { "suit": "oro",    "value": 7, "played": false },
+      { "suit": "copa",   "value": 3, "played": false }
+    ],
+    "teamScores": [0, 0],
+    "currentTurnId": 1,
+    "envidoOpen": true,
+    "challenge": null,
+    "tricks": [],
+    "currentTrickPlays": []
+  }
+}
+```
+
+**`challenge`** cuando está activo:
+```json
+"challenge": {
+  "type": "truco",
+  "callerId": 2,
+  "callerTeam": 1,
+  "pointsIfAccepted": 2,
+  "pointsIfRejected": 1
+}
+```
+
+---
+
+**`truco-your-turn`** — notificación simple cuando es el turno del jugador.
+```json
+{ "event": "truco-your-turn", "data": {} }
+```
+
+---
+
+**`truco-challenge`** — broadcast cuando alguien canta.
+```json
+{ "event": "truco-challenge", "data": { "type": "truco", "callerUsername": "pepe" } }
+```
+
+---
+
+**`truco-hand-end`** — fin de una mano.
+```json
+{
+  "event": "truco-hand-end",
+  "data": {
+    "winnerTeam": 0,
+    "trucoPoints": 2,
+    "envidoPoints": 3,
+    "details": "Truco (2 pts) + Real Envido (3 pts)",
+    "teamScores": [5, 2]
+  }
+}
+```
+
+---
+
+**`truco-game-over`** — fin de la partida.
+```json
+{ "event": "truco-game-over", "data": { "winnerTeam": 0 } }
+```
+
+---
+
+**`truco-error`** — error de validación.
+```json
+{ "event": "truco-error", "data": { "message": "No es tu turno" } }
+```
+
+---
+
+### Schema SQL (agregar a schema.sql)
+
+```sql
+CREATE TABLE IF NOT EXISTS truco_tables (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  status      VARCHAR(20) DEFAULT 'waiting',
+  max_players INT NOT NULL CHECK (max_players IN (2,4)),
+  buy_in      INT NOT NULL DEFAULT 0,
+  point_limit INT NOT NULL DEFAULT 15,
+  team0_score INT NOT NULL DEFAULT 0,
+  team1_score INT NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS truco_players (
+  id         SERIAL PRIMARY KEY,
+  table_id   UUID REFERENCES truco_tables(id) ON DELETE CASCADE,
+  user_id    INT REFERENCES users(id),
+  team_index INT NOT NULL CHECK (team_index IN (0,1)),
+  seat_index INT NOT NULL,
+  joined_at  TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+---
+
 ## Fase Nueva — Cambios de "Juegos de Carta" (Junio 2026)
 
 ### 1. Inicialización de Saldo en Nuevos Registros
