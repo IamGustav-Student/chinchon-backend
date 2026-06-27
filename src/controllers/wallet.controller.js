@@ -1,5 +1,20 @@
 const db = require('../models/db');
 
+const DEPOSIT_PREFIX = 'JDC';
+const MP_ALIAS = process.env.MP_ALIAS || 'juegosdecartas';
+
+function buildDepositCode(username) {
+  return `${DEPOSIT_PREFIX}-${username.toUpperCase()}`;
+}
+
+async function getDepositInfo(req, res) {
+  res.json({
+    alias: MP_ALIAS,
+    code: buildDepositCode(req.user.username),
+    instructions: `Transferí a "${MP_ALIAS}" y escribí el código como concepto obligatorio.`,
+  });
+}
+
 async function getBalance(req, res) {
   try {
     const result = await db.query('SELECT balance FROM users WHERE id = $1', [req.user.id]);
@@ -80,4 +95,4 @@ async function getHistory(req, res) {
   }
 }
 
-module.exports = { getBalance, deposit, withdraw, getHistory };
+module.exports = { getDepositInfo, buildDepositCode, getBalance, deposit, withdraw, getHistory };

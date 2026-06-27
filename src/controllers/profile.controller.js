@@ -16,12 +16,12 @@ async function getProfile(req, res) {
 }
 
 async function updateProfile(req, res) {
-  const { username, avatar } = req.body;
+  const { avatar } = req.body;
   try {
     const result = await db.query(
-      `UPDATE users SET username = COALESCE($1, username), avatar = COALESCE($2, avatar)
-       WHERE id = $3 RETURNING id, username, email, avatar, balance`,
-      [username, avatar, req.user.id]
+      `UPDATE users SET avatar = COALESCE($1, avatar)
+       WHERE id = $2 RETURNING id, username, email, avatar, balance`,
+      [avatar, req.user.id]
     );
     res.json(result.rows[0]);
   } catch {

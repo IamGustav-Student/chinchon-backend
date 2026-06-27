@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS deposit_requests (
   sender_name    VARCHAR(255) NOT NULL,
   sender_bank    VARCHAR(100) NOT NULL,
   transaction_id VARCHAR(100) NOT NULL,
+  mp_payment_id  VARCHAR(50) UNIQUE,
   approved       BOOLEAN NOT NULL DEFAULT false,
   created_at     TIMESTAMPTZ DEFAULT NOW()
 );
@@ -115,6 +116,13 @@ BEGIN
       'holdem-buyin', 'holdem-cashout'
     ));
 EXCEPTION WHEN others THEN NULL;
+END$$;
+
+-- Migración: agregar mp_payment_id a deposit_requests
+DO $$
+BEGIN
+  ALTER TABLE deposit_requests ADD COLUMN mp_payment_id VARCHAR(50) UNIQUE;
+EXCEPTION WHEN duplicate_column THEN NULL;
 END$$;
 
 -- Migración: cambiar avatar a TEXT para soportar base64
