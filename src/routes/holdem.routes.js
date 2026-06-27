@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const auth = require('../middleware/auth.middleware');
+const auth = require('../middlewares/auth.middleware');
 const { listTables, getTable, createTable, joinTable, rebuy } = require('../controllers/holdem.controller');
 
 router.get('/list',        auth, listTables);
