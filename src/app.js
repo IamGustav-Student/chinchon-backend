@@ -2,8 +2,21 @@ require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
+const db = require('./models/db');
 const { initWebSocket, sendToUser, broadcastToAll } = require('./websocket/game.ws');
 const tournamentScheduler = require('./tournament/tournament.scheduler');
+
+async function runMigrations() {
+  try {
+    const sql = fs.readFileSync(path.join(__dirname, 'models/schema.sql'), 'utf8');
+    await db.query(sql);
+    console.log('Migraciones ejecutadas correctamente');
+  } catch (err) {
+    console.error('Error en migraciones:', err.message);
+  }
+}
 
 const authRoutes = require('./routes/auth.routes');
 const gameRoutes = require('./routes/game.routes');
@@ -38,6 +51,8 @@ holdemWs.init(sendToUser, broadcastToAll);
 tournamentScheduler.init(sendToUser, broadcastToAll);
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`Servidor corriendo en puerto ${PORT}`);
+runMigrations().then(() => {
+  server.listen(PORT, () => {
+    console.log(`Servidor corriendo en puerto ${PORT}`);
+  });
 });
