@@ -1,6 +1,30 @@
-# Requisitos de Backend — Chinchón Online
+# Requisitos de Backend — Juegos de Carta
 
 Este archivo reúne todo lo que el backend necesita implementar o verificar para que el frontend funcione correctamente. Se va actualizando al finalizar cada fase de desarrollo del frontend.
+
+---
+
+## Fase Nueva — Cambios de "Juegos de Carta" (Junio 2026)
+
+### 1. Inicialización de Saldo en Nuevos Registros
+- **Endpoint:** `POST /api/auth/register`
+- **Cambio:** Cuando un nuevo usuario se registra, debe ingresar con exactamente **$0 (cero pesos)** en su saldo inicial en lugar de cualquier monto de prueba anterior.
+
+### 2. Soporte para Mesas Gratis
+- **Endpoint:** `POST /api/game/create` (Creación de mesa)
+- **Cambio:** Permitir que el parámetro `bet` sea igual a `0` (cero) para admitir mesas de juego gratuitas.
+
+### 3. Registro y Validación de Depósitos
+- **Endpoint:** `POST /api/wallet/deposit`
+- **Parámetros esperados:** `{ amount, senderName, senderBank, transactionId }`
+- **Lógica requerida:**
+  - Registrar el intento de depósito con el banco de origen, titular de la cuenta de origen y el identificador de comprobante.
+  - El sistema de administración o backend debe validar que el `senderName` (Nombre del titular de origen) coincida exactamente con el nombre de usuario registrado o titular de la cuenta de juego.
+  - La acreditación debe realizarse únicamente si se aprueba la coincidencia de titularidad.
+
+### 4. Soporte para Avatares Personalizados (Base64)
+- **Endpoint:** `PUT /api/perfil` (y campos de base de datos para `avatar`)
+- **Cambio:** Habilitar el guardado de strings largos en la base de datos (campo `avatar` en Postgres / MongoDB) para soportar las imágenes en formato DataURL Base64 subidas desde el frontend. El frontend enviará strings con formato `data:image/jpeg;base64,...`.
 
 ---
 
