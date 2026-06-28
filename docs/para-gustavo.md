@@ -1282,3 +1282,110 @@ Los siguientes items de lógica de negocio los vamos a pedir en la próxima fase
 - Actualizar `games_played`, `games_won`, `games_lost` en la tabla `users`
 - Hacer upsert en `weekly_ranking` con los puntos y ganancias del ganador
 - Gestión de reconexión: si un jugador se desconecta y reconecta durante la partida, restaurarle su mano y el estado actual de la mesa
+
+---
+
+## Fase 8 — Mejoras UX (Junio 2026)
+
+### 1. Campo `bio` en usuarios
+
+Agregar columna `bio VARCHAR(200) DEFAULT ''` en la tabla `users`.
+
+Incluir `bio` en la respuesta de `GET /api/perfil` y aceptarlo en `PUT /api/perfil`:
+
+```json
+// PUT /api/perfil body
+{ "avatar": "...", "bio": "Texto libre del usuario" }
+
+// GET /api/perfil response (agregar)
+{ ..., "bio": "Texto libre del usuario" }
+```
+
+También incluir `bio` en `GET /api/auth/login` y `POST /api/auth/register` (respuesta `user` con `bio`).
+
+---
+
+### 2. Inscriptos en torneo — campo `registeredPlayers`
+
+El endpoint `GET /api/tournament/current` debe incluir la lista de jugadores inscriptos cuando `status === 'registration_open'`:
+
+```json
+{
+  "id": "...",
+  "status": "registration_open",
+  "registeredCount": 5,
+  "registeredPlayers": [
+    { "id": 1, "username": "juan", "avatar": "👨" },
+    { "id": 2, "username": "maria", "avatar": "👩" }
+  ]
+}
+```
+
+---
+
+### 3. Sistema de mensajes privados
+
+Tabla SQL:
+
+```sql
+CREATE TABLE private_messages (
+  id          SERIAL PRIMARY KEY,
+  sender_id   INT NOT NULL REFERENCES users(id),
+  recipient_id INT NOT NULL REFERENCES users(id),
+  body        TEXT NOT NULL,
+  read        BOOLEAN NOT NULL DEFAULT FALSE,
+  parent_id   INT REFERENCES private_messages(id),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_pm_recipient ON private_messages(recipient_id, read);
+```
+
+Endpoints:
+
+```
+GET  /api/messages                      → lista mensajes recibidos (ordenados desc por created_at)
+GET  /api/messages/unread-count         → { count: N }
+POST /api/messages                      → { recipientId, body, parentId? } → crea mensaje
+PUT  /api/messages/:id/read             → marca como leído
+```
+
+Respuesta de `GET /api/messages`:
+
+```json
+[
+  {
+    "id": 1,
+    "senderId": 5,
+    "senderUsername": "maria",
+    "senderAvatar": "👩",
+    "recipientId": 1,
+    "body": "Hola! ¿jugamos?",
+    "read": false,
+    "createdAt": "2026-06-27T15:00:00Z",
+    "parentId": null
+  }
+]
+```
+
+El frontend también accede a `GET /api/messages/unread-count` al iniciar la sesión para mostrar el badge en la navbar.
+
+---
+
+### 4. Envío de mensajes desde partidas
+
+Cuando un jugador hace click en el avatar de otro en cualquier mesa y elige "Enviar mensaje", el frontend llama a `POST /api/messages`. Este endpoint ya está en el punto 3.
+
+---
+
+### 5. Agrego `addFriend` (futuro)
+
+El botón "Agregar amigo" en el menú de jugador actualmente muestra un toast informativo. En el futuro se puede implementar:
+
+```
+POST /api/friends/request  { targetUserId }
+GET  /api/friends
+DELETE /api/friends/:userId
+```
+
+Por ahora no es prioritario.
