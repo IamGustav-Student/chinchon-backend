@@ -46,14 +46,6 @@ app.get('/api/ping', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-app.get('/api/admin/users', async (req, res) => {
-  if (req.headers['x-admin-key'] !== process.env.ADMIN_KEY) return res.sendStatus(401);
-  const result = await db.query(
-    'SELECT id, username, email, balance, created_at FROM users ORDER BY id'
-  );
-  res.json(result.rows);
-});
-
 const holdemWs = require('./websocket/holdem.ws');
 
 initWebSocket(server);
