@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash VARCHAR(255) NOT NULL,
   avatar        TEXT DEFAULT 'avatar-1',
   balance       INTEGER DEFAULT 0,
+  is_admin      BOOLEAN DEFAULT false,
   games_played  INTEGER DEFAULT 0,
   games_won     INTEGER DEFAULT 0,
   games_lost    INTEGER DEFAULT 0,
@@ -122,6 +123,13 @@ END$$;
 DO $$
 BEGIN
   ALTER TABLE deposit_requests ADD COLUMN mp_payment_id VARCHAR(50) UNIQUE;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END$$;
+
+-- Migración: agregar columna is_admin
+DO $$
+BEGIN
+  ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT false;
 EXCEPTION WHEN duplicate_column THEN NULL;
 END$$;
 

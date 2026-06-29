@@ -46,6 +46,14 @@ app.get('/api/ping', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+app.post('/api/admin/setup', async (req, res) => {
+  if (req.headers['x-admin-key'] !== process.env.ADMIN_KEY) return res.sendStatus(401);
+  await db.query('DELETE FROM users WHERE id IN (1, 4)');
+  await db.query('UPDATE users SET is_admin = true WHERE id = 5');
+  const result = await db.query('SELECT id, username, email, balance, is_admin FROM users ORDER BY id');
+  res.json(result.rows);
+});
+
 const holdemWs = require('./websocket/holdem.ws');
 
 initWebSocket(server);
