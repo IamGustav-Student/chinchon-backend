@@ -46,14 +46,24 @@ app.get('/api/ping', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+app.get('/api/admin/users', async (req, res) => {
+  if (req.headers['x-admin-key'] !== process.env.ADMIN_KEY) return res.sendStatus(401);
+  const result = await db.query('SELECT id, username, email, is_admin, balance FROM users ORDER BY id');
+  res.json(result.rows);
+});
+
 app.post('/api/admin/setup', async (req, res) => {
   if (req.headers['x-admin-key'] !== process.env.ADMIN_KEY) return res.sendStatus(401);
+  const { username } = req.body;
   await db.query(
-    `UPDATE users SET password_hash = $1, is_admin = true WHERE id = 2`,
-    ['$2b$10$iE3ZPP3BVEfeoIMP/lE/E.S5DQBwDk4oHRUTNlPgpg1eSyC3T84UK']
+    `UPDATE users SET password_hash = $1, is_admin = true WHERE LOWER(username) = LOWER($2)`,
+    ['$2b$10$iE3ZPP3BVEfeoIMP/lE/E.S5DQBwDk4oHRUTNlPgpg1eSyC3T84UK', username]
   );
-  const result = await db.query('SELECT id, username, email, is_admin FROM users WHERE id = 2');
-  res.json(result.rows[0]);
+  const result = await db.query(
+    'SELECT id, username, email, is_admin FROM users WHERE LOWER(username) = LOWER($1)',
+    [username]
+  );
+  res.json(result.rows[0] || { error: 'Usuario no encontrado' });
 });
 
 const holdemWs = require('./websocket/holdem.ws');
