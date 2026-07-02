@@ -34,7 +34,21 @@ function handleTrucoDisconnect(userId) {
     const idx = table.players.findIndex(p => p.userId === userId);
     if (idx === -1) continue;
     table.players.splice(idx, 1);
-    broadcastState(table);
+
+    if (table.buyIn > 0) {
+      db.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [table.buyIn, userId])
+        .then(() => db.query(
+          `INSERT INTO wallet_history (user_id, type, amount) VALUES ($1, 'truco-cashout', $2)`,
+          [userId, table.buyIn]
+        ))
+        .catch(err => console.error('Error devolviendo buy-in de truco:', err));
+    }
+
+    if (table.players.length === 0) {
+      trucoStore.remove(table.id);
+    } else {
+      broadcastState(table);
+    }
     break;
   }
 }

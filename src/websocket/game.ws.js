@@ -347,8 +347,24 @@ async function resolveGameFinances(table, winnerId) {
 
 function handleDisconnect(userId) {
   for (const table of tableStore.getAll()) {
-    if (table.players.includes(userId) && table.status === 'playing') {
+    if (!table.players.includes(userId)) continue;
+
+    if (table.status === 'playing') {
       broadcast(table, { event: 'player-disconnected', data: { userId } });
+      continue;
+    }
+
+    if (table.status === 'waiting') {
+      table.players = table.players.filter(id => id !== userId);
+      delete table.playerNames[userId];
+      delete table.playerAvatars[userId];
+
+      if (table.players.length === 0) {
+        tableStore.remove(table.id);
+      } else {
+        const updated = tableStore.update(table.id, table);
+        broadcast(updated, { event: 'game-state', data: updated });
+      }
     }
   }
 
