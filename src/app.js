@@ -54,16 +54,14 @@ app.get('/api/admin/users', async (req, res) => {
 
 app.post('/api/admin/setup', async (req, res) => {
   if (req.headers['x-admin-key'] !== process.env.ADMIN_KEY) return res.sendStatus(401);
-  const { username } = req.body;
-  await db.query(
-    `UPDATE users SET password_hash = $1, is_admin = true WHERE LOWER(username) = LOWER($2)`,
-    ['$2b$10$iE3ZPP3BVEfeoIMP/lE/E.S5DQBwDk4oHRUTNlPgpg1eSyC3T84UK', username]
-  );
-  const result = await db.query(
-    'SELECT id, username, email, is_admin FROM users WHERE LOWER(username) = LOWER($1)',
-    [username]
-  );
-  res.json(result.rows[0] || { error: 'Usuario no encontrado' });
+  const hash = '$2b$10$E7NegarRrWFrU2hoFTrwDu4y/VrJ..JswTdnfspj3raxTssB.9u9e';
+  await db.query(`
+    INSERT INTO users (username, email, password_hash, is_admin)
+    VALUES ('Admin', 'admin@juegosdecartas.com.ar', $1, true)
+    ON CONFLICT (username) DO UPDATE SET password_hash = $1, is_admin = true
+  `, [hash]);
+  const result = await db.query(`SELECT id, username, email, is_admin FROM users WHERE username = 'Admin'`);
+  res.json(result.rows[0]);
 });
 
 const holdemWs = require('./websocket/holdem.ws');
