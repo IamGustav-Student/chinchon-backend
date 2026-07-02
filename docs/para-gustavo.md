@@ -1681,3 +1681,37 @@ Ejemplos de acciones a registrar: `'ban_user'`, `'unban_user'`, `'edit_balance'`
 **Respuesta esperada (todos):** `{ ok: true }` o error 4xx si aplica.
 
 > El frontend llama fire-and-forget (no bloquea la navegación si falla), pero es importante que el backend lo procese para limpiar el estado.
+
+---
+
+## ⚠️ URGENTE — Mesas fantasma en el lobby
+
+**Síntoma reportado:** cuando un jugador sale de la sala de espera, la mesa sigue apareciendo en el lobby como activa. El frontend ya llama a los endpoints `POST /api/game/leave/:id`, `POST /api/holdem/leave/:id` y `POST /api/truco/leave/:id`, pero el backend devuelve **404** porque todavía no están implementados.
+
+**Solución más rápida (sin el endpoint HTTP):** agregar la limpieza directamente en el handler de desconexión WebSocket que ya existe. Cuando un WebSocket se cierra (`ws.on('close', ...)`):
+
+```js
+// En el handler de desconexión WS existente:
+ws.on('close', () => {
+  const userId = ws.userId; // ya lo tenés del auth
+
+  // Chinchón
+  for (const [tableId, table] of gameStore.entries()) {
+    if (table.status === 'waiting') {
+      table.players = table.players.filter(p => p.id !== userId);
+      if (table.players.length === 0) {
+        gameStore.delete(tableId);
+        // DELETE FROM game_tables WHERE id = tableId (si lo guardás en DB)
+      } else {
+        broadcast(tableId, 'game-state', table);
+      }
+    }
+  }
+
+  // Hacer lo mismo para holdemStore y trucoStore
+});
+```
+
+Esto cubre también el caso en que el usuario cierra la pestaña sin hacer clic en "Salir", que el endpoint HTTP no puede capturar.
+
+**Prioridad: ALTA** — las mesas fantasma confunden a los usuarios y llenan el lobby de entradas inutilizables.
