@@ -139,3 +139,17 @@ BEGIN
   ALTER TABLE users ALTER COLUMN avatar TYPE TEXT;
 EXCEPTION WHEN others THEN NULL;
 END$$;
+
+-- Migración: agregar columna banned
+DO $$
+BEGIN
+  ALTER TABLE users ADD COLUMN banned BOOLEAN DEFAULT false;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END$$;
+
+-- Migración: agregar columna rejected a deposit_requests
+DO $$
+BEGIN
+  ALTER TABLE deposit_requests ADD COLUMN rejected BOOLEAN DEFAULT false;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END$$;

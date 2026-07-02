@@ -38,8 +38,9 @@ async function login(req, res) {
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) return res.status(401).json({ error: 'Credenciales incorrectas' });
 
+    if (user.banned) return res.status(403).json({ error: 'Cuenta suspendida' });
     const token = jwt.sign({ id: user.id, username: user.username }, process.env.JWT_SECRET, { expiresIn: '7d' });
-    res.json({ token, user: { id: user.id, username: user.username, email: user.email, balance: user.balance, avatar: user.avatar } });
+    res.json({ token, user: { id: user.id, username: user.username, email: user.email, balance: user.balance, avatar: user.avatar, role: user.is_admin ? 'admin' : 'user' } });
   } catch {
     res.status(500).json({ error: 'Error interno del servidor' });
   }

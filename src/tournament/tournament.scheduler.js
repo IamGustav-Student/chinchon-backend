@@ -311,4 +311,12 @@ function shuffleArray(arr) {
   }
 }
 
-module.exports = { init, handleTournamentDisconnect, handleTournamentReconnect };
+async function adminStartTournament() {
+  await startTournament();
+}
+
+async function adminCancelTournament() {
+  await cancelTournament('admin_cancelled');
+}
+
+module.exports = { init, handleTournamentDisconnect, handleTournamentReconnect, adminStartTournament, adminCancelTournament };
