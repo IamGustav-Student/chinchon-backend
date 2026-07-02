@@ -1611,4 +1611,45 @@ CREATE TABLE admin_actions (
 );
 ```
 
+---
+
+## FIX — Sala de espera: jugadores no se ven (todos los juegos)
+
+**Problema detectado (frontend):** cuando un jugador ya está en la sala de espera y llega un segundo jugador, el evento `player-joined` / `holdem-player-joined` / `truco-player-joined` se recibe pero no contiene `id`, por lo que el frontend no puede agregarlo al array de jugadores local. El resultado es que el jugador original sigue viendo asientos vacíos.
+
+**Solución requerida (backend):** incluir el campo `id` en todos los eventos de "jugador se unió":
+
+### Chinchón — evento `player-joined`
+```json
+{
+  "id": 42,
+  "username": "Roberto",
+  "avatar": "🃏"
+}
+```
+
+### Hold'em — evento `holdem-player-joined`
+```json
+{
+  "id": 42,
+  "username": "Roberto",
+  "avatar": "🃏",
+  "stack": 1000,
+  "seatIndex": 1
+}
+```
+
+### Truco — evento `truco-player-joined`
+```json
+{
+  "id": 42,
+  "username": "Roberto",
+  "avatar": "🎴",
+  "teamIndex": 0,
+  "seatIndex": 1
+}
+```
+
+**Alternativa más robusta:** en lugar de (o además de) los eventos `*-player-joined`, enviar un `game-state` / `holdem-game-state` / `truco-game-state` actualizado a **todos** los jugadores de la mesa cada vez que alguien se une en estado `waiting`. Esto garantiza que todos tengan el estado completo sin depender de que los campos estén en el evento de join.
+
 Ejemplos de acciones a registrar: `'ban_user'`, `'unban_user'`, `'edit_balance'`, `'approve_deposit'`, `'reject_deposit'`, `'close_table'`, `'start_tournament'`, `'cancel_tournament'`.
