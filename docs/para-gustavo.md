@@ -1653,3 +1653,31 @@ CREATE TABLE admin_actions (
 **Alternativa más robusta:** en lugar de (o además de) los eventos `*-player-joined`, enviar un `game-state` / `holdem-game-state` / `truco-game-state` actualizado a **todos** los jugadores de la mesa cada vez que alguien se une en estado `waiting`. Esto garantiza que todos tengan el estado completo sin depender de que los campos estén en el evento de join.
 
 Ejemplos de acciones a registrar: `'ban_user'`, `'unban_user'`, `'edit_balance'`, `'approve_deposit'`, `'reject_deposit'`, `'close_table'`, `'start_tournament'`, `'cancel_tournament'`.
+
+---
+
+## FIX — Endpoint "abandonar mesa en espera" (los tres juegos)
+
+**Problema:** cuando un jugador abandona una mesa que todavía está en estado `waiting`, la mesa queda activa indefinidamente en el lobby aunque nadie esté sentado.
+
+**Solución requerida:** implementar un endpoint `POST /api/<juego>/leave/:id` para cada juego. El frontend lo llama cuando el jugador confirma que quiere salir y la partida aún no comenzó.
+
+### Chinchón — `POST /api/game/leave/:id`
+- Quitar al jugador de `table.players`
+- Si `table.players` queda vacío → eliminar la mesa del store y de la DB
+- Si hay otros jugadores → solo quitarlo y emitir `game-state` actualizado
+
+### Hold'em — `POST /api/holdem/leave/:id`
+- Solo aplica en estado `waiting` (durante una partida usa la lógica ya existente de fold + cashout)
+- Devolver el buy-in al jugador: `UPDATE users SET balance = balance + buyIn WHERE id = $userId`
+- Registrar en `wallet_history` con tipo `'holdem-cashout'`
+- Si la mesa queda vacía → `DELETE FROM holdem_tables WHERE id = $id`
+
+### Truco — `POST /api/truco/leave/:id`
+- Quitar al jugador del `trucoStore`
+- Si la mesa queda vacía → eliminarla
+- Si el buy-in es > 0 → devolverlo: `UPDATE users SET balance = balance + buyIn WHERE id = $userId`
+
+**Respuesta esperada (todos):** `{ ok: true }` o error 4xx si aplica.
+
+> El frontend llama fire-and-forget (no bloquea la navegación si falla), pero es importante que el backend lo procese para limpiar el estado.
