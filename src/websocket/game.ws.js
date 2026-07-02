@@ -6,6 +6,7 @@ const engine = require('../game/chinchon.engine');
 const db = require('../models/db');
 const gameEvents = require('../events/game.events');
 const holdemWs = require('./holdem.ws');
+const trucoWs = require('./truco.ws');
 
 // userId -> ws
 const connections = new Map();
@@ -57,6 +58,9 @@ function handleMessage(ws, user, { event, data }) {
   if (event.startsWith('holdem-')) {
     return holdemWs.handleHoldemMessage(ws, user, event, data || {});
   }
+  if (event.startsWith('truco-')) {
+    return trucoWs.handleTrucoMessage(ws, user, event, data || {});
+  }
   switch (event) {
     case 'join-table':       return handleJoinTable(ws, user, data);
     case 'draw-card':        return handleDrawCard(ws, user, data);
@@ -86,12 +90,15 @@ function handleJoinTable(ws, user, { tableId }) {
     return;
   }
 
-  broadcast(table, { event: 'player-joined', data: { userId: user.id, username: user.username } });
+  broadcast(table, {
+    event: 'player-joined',
+    data: { id: user.id, username: user.username, avatar: table.playerAvatars?.[user.id] || 'avatar-1' },
+  });
 
   if (table.players.length === table.maxPlayers && table.status === 'waiting') {
     startGame(table);
   } else {
-    send(ws, { event: 'game-state', data: publicState(table, user.id) });
+    broadcast(table, { event: 'game-state', data: publicState(table, user.id) });
   }
 }
 
@@ -349,8 +356,9 @@ function handleDisconnect(userId) {
   const { handleTournamentDisconnect } = require('../tournament/tournament.scheduler');
   handleTournamentDisconnect(userId);
 
-  // Notificar hold'em
+  // Notificar hold'em y truco
   holdemWs.handleHoldemDisconnect(userId);
+  trucoWs.handleTrucoDisconnect(userId);
 }
 
 // ── Utilidades ──────────────────────────────────────────────────────────────

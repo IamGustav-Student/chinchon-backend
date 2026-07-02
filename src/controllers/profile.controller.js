@@ -3,8 +3,9 @@ const db = require('../models/db');
 async function getProfile(req, res) {
   try {
     const result = await db.query(
-      `SELECT id, username, email, avatar, balance,
-              games_played, games_won, games_lost
+      `SELECT id, username, email, avatar, balance, bio,
+              games_played, games_won, games_lost,
+              CASE WHEN is_admin THEN 'admin' ELSE 'user' END AS role
        FROM users WHERE id = $1`,
       [req.user.id]
     );
@@ -16,12 +17,15 @@ async function getProfile(req, res) {
 }
 
 async function updateProfile(req, res) {
-  const { avatar } = req.body;
+  const { avatar, bio } = req.body;
   try {
     const result = await db.query(
-      `UPDATE users SET avatar = COALESCE($1, avatar)
-       WHERE id = $2 RETURNING id, username, email, avatar, balance`,
-      [avatar, req.user.id]
+      `UPDATE users SET
+         avatar = COALESCE($1, avatar),
+         bio = COALESCE($2, bio)
+       WHERE id = $3
+       RETURNING id, username, email, avatar, balance, bio`,
+      [avatar, bio, req.user.id]
     );
     res.json(result.rows[0]);
   } catch {

@@ -21,15 +21,15 @@ async function createTable(req, res) {
   if (![2, 4].includes(maxPlayers)) return res.status(400).json({ error: 'Capacidad inválida' });
 
   try {
-    if (bet > 0) {
-      const balance = await db.query('SELECT balance FROM users WHERE id = $1', [req.user.id]);
-      if (balance.rows[0].balance < bet) return res.status(400).json({ error: 'Saldo insuficiente' });
-    }
+    const userRow = await db.query('SELECT balance, avatar FROM users WHERE id = $1', [req.user.id]);
+    if (!userRow.rows[0]) return res.status(404).json({ error: 'Usuario no encontrado' });
+    if (bet > 0 && userRow.rows[0].balance < bet) return res.status(400).json({ error: 'Saldo insuficiente' });
 
     const table = tableStore.create({
       id: uuidv4(),
       creatorId: req.user.id,
       creatorName: req.user.username,
+      creatorAvatar: userRow.rows[0].avatar,
       bet,
       maxPlayers,
       pointLimit: pointLimit || 100,
@@ -53,7 +53,8 @@ async function joinTable(req, res) {
       if (balance.rows[0].balance < table.bet) return res.status(400).json({ error: 'Saldo insuficiente' });
     }
 
-    tableStore.addPlayer(table.id, req.user.id, req.user.username);
+    const avatarRow = await db.query('SELECT avatar FROM users WHERE id = $1', [req.user.id]);
+    tableStore.addPlayer(table.id, req.user.id, req.user.username, avatarRow.rows[0]?.avatar);
     res.json(tableStore.get(table.id));
   } catch {
     res.status(500).json({ error: 'Error interno del servidor' });

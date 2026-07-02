@@ -14,12 +14,13 @@ async function register(req, res) {
     const hash = await bcrypt.hash(password, 10);
     const result = await db.query(
       `INSERT INTO users (username, email, password_hash, balance)
-       VALUES ($1, $2, $3, $4) RETURNING id, username, email, balance`,
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, username, email, balance, avatar, bio, is_admin`,
       [username, email, hash, INITIAL_BALANCE]
     );
-    const user = result.rows[0];
-    const token = jwt.sign({ id: user.id, username: user.username }, process.env.JWT_SECRET, { expiresIn: '7d' });
-    res.status(201).json({ token, user });
+    const u = result.rows[0];
+    const token = jwt.sign({ id: u.id, username: u.username }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    res.status(201).json({ token, user: { ...u, role: u.is_admin ? 'admin' : 'user' } });
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Usuario o email ya registrado' });
     res.status(500).json({ error: 'Error interno del servidor' });

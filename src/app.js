@@ -27,6 +27,8 @@ const tournamentRoutes = require('./routes/tournament.routes');
 const holdemRoutes = require('./routes/holdem.routes');
 const webhookRoutes = require('./routes/webhook.routes');
 const adminRoutes = require('./routes/admin.routes');
+const messagesRoutes = require('./routes/messages.routes');
+const trucoRoutes = require('./routes/truco.routes');
 
 const app = express();
 const server = http.createServer(app);
@@ -43,6 +45,8 @@ app.use('/api/tournament', tournamentRoutes);
 app.use('/api/holdem', holdemRoutes);
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/messages', messagesRoutes);
+app.use('/api/truco', trucoRoutes);
 
 app.get('/api/ping', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -50,9 +54,11 @@ app.get('/api/ping', (req, res) => {
 
 
 const holdemWs = require('./websocket/holdem.ws');
+const trucoWs = require('./websocket/truco.ws');
 
 initWebSocket(server);
 holdemWs.init(sendToUser, broadcastToAll);
+trucoWs.init(sendToUser, broadcastToAll);
 tournamentScheduler.init(sendToUser, broadcastToAll);
 
 const PORT = process.env.PORT || 3000;

@@ -52,8 +52,8 @@ function handleJoinTable(ws, user, { tableId }) {
     return _sendToUser(user.id, { event: 'holdem-error', data: { tableId, message: 'No estás en esta mesa' } });
   }
 
-  // Send current state
-  sendGameState(table, user.id);
+  // Broadcast updated state to all players at the table
+  broadcastGameState(table);
 
   // If waiting and enough players, schedule start
   if (table.status === 'waiting' && table.seats.length >= 2 && !table.nextHandTimer) {

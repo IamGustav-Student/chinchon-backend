@@ -52,6 +52,7 @@ async function getUsers(req, res) {
 async function banUser(req, res) {
   try {
     await db.query('UPDATE users SET banned = true WHERE id = $1', [req.params.id]);
+    await logAction(req.user.id, 'ban_user', 'user', req.params.id, {});
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -61,6 +62,7 @@ async function banUser(req, res) {
 async function unbanUser(req, res) {
   try {
     await db.query('UPDATE users SET banned = false WHERE id = $1', [req.params.id]);
+    await logAction(req.user.id, 'unban_user', 'user', req.params.id, {});
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -71,7 +73,16 @@ async function editBalance(req, res) {
   try {
     const { balance } = req.body;
     if (typeof balance !== 'number' || balance < 0) return res.status(400).json({ error: 'Saldo inválido' });
+    const prev = await db.query('SELECT balance FROM users WHERE id = $1', [req.params.id]);
+    const diff = balance - (prev.rows[0]?.balance ?? 0);
     await db.query('UPDATE users SET balance = $1 WHERE id = $2', [balance, req.params.id]);
+    if (diff !== 0) {
+      await db.query(
+        `INSERT INTO wallet_history (user_id, type, amount) VALUES ($1, 'admin-adjustment', $2)`,
+        [req.params.id, diff]
+      );
+    }
+    await logAction(req.user.id, 'edit_balance', 'user', req.params.id, { balance, diff });
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -83,6 +94,7 @@ async function setRole(req, res) {
     const { role } = req.body;
     if (!['user', 'admin'].includes(role)) return res.status(400).json({ error: 'Rol inválido' });
     await db.query('UPDATE users SET is_admin = $1 WHERE id = $2', [role === 'admin', req.params.id]);
+    await logAction(req.user.id, 'set_role', 'user', req.params.id, { role });
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -114,6 +126,15 @@ async function getDeposits(req, res) {
   }
 }
 
+async function logAction(adminId, action, targetType, targetId, detail) {
+  try {
+    await db.query(
+      `INSERT INTO admin_actions (admin_id, action, target_type, target_id, detail) VALUES ($1,$2,$3,$4,$5)`,
+      [adminId, action, targetType, String(targetId), detail]
+    );
+  } catch (_) {}
+}
+
 async function approveDeposit(req, res) {
   try {
     await db.query('BEGIN');
@@ -127,6 +148,7 @@ async function approveDeposit(req, res) {
     await db.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [d.amount, d.user_id]);
     await db.query(`INSERT INTO wallet_history (user_id, type, amount) VALUES ($1, 'deposit', $2)`, [d.user_id, d.amount]);
     await db.query('COMMIT');
+    await logAction(req.user.id, 'approve_deposit', 'deposit', req.params.id, { amount: d.amount });
     res.json({ ok: true });
   } catch (err) {
     await db.query('ROLLBACK');
@@ -137,6 +159,7 @@ async function approveDeposit(req, res) {
 async function rejectDeposit(req, res) {
   try {
     await db.query('UPDATE deposit_requests SET rejected = true WHERE id = $1', [req.params.id]);
+    await logAction(req.user.id, 'reject_deposit', 'deposit', req.params.id, {});
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

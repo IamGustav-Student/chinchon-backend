@@ -25,7 +25,7 @@ async function getCurrent(req, res) {
   if (!t) return res.status(404).json({ error: 'No hay torneo programado' });
 
   const prizePool = t.registrations.size * t.entryFee;
-  res.json({
+  const response = {
     id: t.id,
     status: t.status,
     startsAt: t.startsAt,
@@ -37,7 +37,22 @@ async function getCurrent(req, res) {
     prizePool,
     winnerPrize: Math.floor(prizePool * 0.7),
     finalistPrize: Math.floor(prizePool * 0.1),
-  });
+  };
+
+  if (t.status === 'registration_open') {
+    const userIds = [...t.registrations.keys()];
+    if (userIds.length > 0) {
+      const rows = await db.query(
+        `SELECT id, username, avatar FROM users WHERE id = ANY($1)`,
+        [userIds]
+      );
+      response.registeredPlayers = rows.rows;
+    } else {
+      response.registeredPlayers = [];
+    }
+  }
+
+  res.json(response);
 }
 
 async function register(req, res) {

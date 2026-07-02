@@ -153,3 +153,58 @@ BEGIN
   ALTER TABLE deposit_requests ADD COLUMN rejected BOOLEAN DEFAULT false;
 EXCEPTION WHEN duplicate_column THEN NULL;
 END$$;
+
+-- Tabla truco
+CREATE TABLE IF NOT EXISTS truco_tables (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  status      VARCHAR(20) DEFAULT 'waiting',
+  max_players INT NOT NULL CHECK (max_players IN (2,4)),
+  buy_in      INT NOT NULL DEFAULT 0,
+  point_limit INT NOT NULL DEFAULT 15,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Mensajes privados
+CREATE TABLE IF NOT EXISTS private_messages (
+  id           SERIAL PRIMARY KEY,
+  sender_id    INT NOT NULL REFERENCES users(id),
+  recipient_id INT NOT NULL REFERENCES users(id),
+  body         TEXT NOT NULL,
+  read         BOOLEAN NOT NULL DEFAULT FALSE,
+  parent_id    INT REFERENCES private_messages(id),
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_pm_recipient ON private_messages(recipient_id, read);
+
+-- Auditoría de acciones admin
+CREATE TABLE IF NOT EXISTS admin_actions (
+  id          SERIAL PRIMARY KEY,
+  admin_id    INT NOT NULL REFERENCES users(id),
+  action      TEXT NOT NULL,
+  target_type TEXT,
+  target_id   TEXT,
+  detail      JSONB,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Migración: campo bio en usuarios
+DO $$
+BEGIN
+  ALTER TABLE users ADD COLUMN bio VARCHAR(200) DEFAULT '';
+EXCEPTION WHEN duplicate_column THEN NULL;
+END$$;
+
+-- Migración: tipo admin-adjustment en wallet_history
+DO $$
+BEGIN
+  ALTER TABLE wallet_history DROP CONSTRAINT IF EXISTS wallet_history_type_check;
+  ALTER TABLE wallet_history ADD CONSTRAINT wallet_history_type_check
+    CHECK (type IN (
+      'deposit', 'withdraw',
+      'game-win', 'game-loss',
+      'tournament-entry', 'tournament-refund', 'tournament-win', 'tournament-finalist',
+      'holdem-buyin', 'holdem-cashout',
+      'admin-adjustment'
+    ));
+EXCEPTION WHEN others THEN NULL;
+END$$;
