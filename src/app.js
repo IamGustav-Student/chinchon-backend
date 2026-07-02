@@ -46,23 +46,6 @@ app.get('/api/ping', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-app.get('/api/admin/users', async (req, res) => {
-  if (req.headers['x-admin-key'] !== process.env.ADMIN_KEY) return res.sendStatus(401);
-  const result = await db.query('SELECT id, username, email, is_admin, balance FROM users ORDER BY id');
-  res.json(result.rows);
-});
-
-app.post('/api/admin/setup', async (req, res) => {
-  if (req.headers['x-admin-key'] !== process.env.ADMIN_KEY) return res.sendStatus(401);
-  const hash = '$2b$10$E7NegarRrWFrU2hoFTrwDu4y/VrJ..JswTdnfspj3raxTssB.9u9e';
-  await db.query(`
-    INSERT INTO users (username, email, password_hash, is_admin)
-    VALUES ('Admin', 'admin@juegosdecartas.com.ar', $1, true)
-    ON CONFLICT (username) DO UPDATE SET password_hash = $1, is_admin = true
-  `, [hash]);
-  const result = await db.query(`SELECT id, username, email, is_admin FROM users WHERE username = 'Admin'`);
-  res.json(result.rows[0]);
-});
 
 const holdemWs = require('./websocket/holdem.ws');
 
