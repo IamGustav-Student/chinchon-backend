@@ -1715,3 +1715,22 @@ ws.on('close', () => {
 Esto cubre también el caso en que el usuario cierra la pestaña sin hacer clic en "Salir", que el endpoint HTTP no puede capturar.
 
 **Prioridad: ALTA** — las mesas fantasma confunden a los usuarios y llenan el lobby de entradas inutilizables.
+
+**Estado actual (confirmado por Barby):**
+- ✅ **Chinchón** — ya funciona correctamente. Las mesas se eliminan al salir.
+- ❌ **Truco** — sigue con mesas fantasma. Aplicar exactamente la misma lógica que implementaste para Chinchón, pero sobre `trucoStore`.
+- ❓ **Hold'em** — no confirmado todavía.
+
+---
+
+## FIX — Mesa gratuita en Hold'em (buyIn = 0)
+
+El frontend ahora permite crear mesas de Hold'em con `buyIn: 0` (opción "Gratis"). El backend necesita soportar este caso:
+
+- **Al crear** (`POST /api/holdem/create`): si `buyIn === 0` → no descontar nada de la billetera del creador.
+- **Al unirse** (`POST /api/holdem/join/:id`): si `buyIn === 0` → no descontar nada.
+- **Al salir o terminar la mano**: si `buyIn === 0` → no devolver nada a la billetera (no hay fichas reales).
+- **Blinds**: si `buyIn === 0`, los blinds también son 0. Las apuestas son de fichas virtuales sin valor real.
+- **Recompra**: sin recompras en mesas gratuitas (o ignorarlas).
+
+El frontend envía `{ buyIn: 0, maxPlayers: 4 }` en el POST de creación. Verificar que la validación no rechace `buyIn: 0`.
