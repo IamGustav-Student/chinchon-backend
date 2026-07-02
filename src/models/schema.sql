@@ -194,7 +194,7 @@ BEGIN
 EXCEPTION WHEN duplicate_column THEN NULL;
 END$$;
 
--- Migración: tipo admin-adjustment en wallet_history
+-- Migración: tipos admin-adjustment y truco-buyin/cashout en wallet_history
 DO $$
 BEGIN
   ALTER TABLE wallet_history DROP CONSTRAINT IF EXISTS wallet_history_type_check;
@@ -204,6 +204,7 @@ BEGIN
       'game-win', 'game-loss',
       'tournament-entry', 'tournament-refund', 'tournament-win', 'tournament-finalist',
       'holdem-buyin', 'holdem-cashout',
+      'truco-buyin', 'truco-cashout',
       'admin-adjustment'
     ));
 EXCEPTION WHEN others THEN NULL;

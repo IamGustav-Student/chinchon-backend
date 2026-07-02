@@ -27,7 +27,7 @@ async function createTable(req, res) {
 
     if (buyIn > 0) {
       await db.query('UPDATE users SET balance = balance - $1 WHERE id = $2', [buyIn, req.user.id]);
-      await db.query(`INSERT INTO wallet_history (user_id, type, amount) VALUES ($1, 'game-loss', $2)`, [req.user.id, -buyIn]);
+      await db.query(`INSERT INTO wallet_history (user_id, type, amount) VALUES ($1, 'truco-buyin', $2)`, [req.user.id, -buyIn]);
     }
 
     const table = trucoStore.create({ id: uuidv4(), maxPlayers, buyIn, pointLimit });
@@ -54,7 +54,7 @@ async function joinTable(req, res) {
 
     if (table.buyIn > 0) {
       await db.query('UPDATE users SET balance = balance - $1 WHERE id = $2', [table.buyIn, req.user.id]);
-      await db.query(`INSERT INTO wallet_history (user_id, type, amount) VALUES ($1, 'game-loss', $2)`, [req.user.id, -table.buyIn]);
+      await db.query(`INSERT INTO wallet_history (user_id, type, amount) VALUES ($1, 'truco-buyin', $2)`, [req.user.id, -table.buyIn]);
     }
 
     const seatIndex = table.players.length;
@@ -68,4 +68,30 @@ async function joinTable(req, res) {
   }
 }
 
-module.exports = { listTables, createTable, joinTable };
+async function leaveTable(req, res) {
+  const table = trucoStore.get(req.params.id);
+  if (!table) return res.status(404).json({ error: 'Mesa no encontrada' });
+  if (table.status !== 'waiting') return res.status(400).json({ error: 'La partida ya comenzó' });
+
+  const idx = table.players.findIndex(p => p.userId === req.user.id);
+  if (idx === -1) return res.status(400).json({ error: 'No estás en esta mesa' });
+
+  const [player] = table.players.splice(idx, 1);
+
+  try {
+    if (table.buyIn > 0) {
+      await db.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [table.buyIn, player.userId]);
+      await db.query(`INSERT INTO wallet_history (user_id, type, amount) VALUES ($1, 'truco-cashout', $2)`, [player.userId, table.buyIn]);
+    }
+
+    if (table.players.length === 0) {
+      trucoStore.remove(table.id);
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+module.exports = { listTables, createTable, joinTable, leaveTable };

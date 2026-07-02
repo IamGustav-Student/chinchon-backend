@@ -121,6 +121,30 @@ async function rebuy(req, res) {
   res.json({ ok: true });
 }
 
+async function leaveTable(req, res) {
+  const userId = req.user.id;
+  const table = holdemStore.get(req.params.id);
+  if (!table) return res.status(404).json({ error: 'Mesa no encontrada' });
+  if (table.status !== 'waiting') return res.status(400).json({ error: 'La partida ya comenzó' });
+
+  const seat = table.seats.find(s => s.userId === userId);
+  if (!seat) return res.status(400).json({ error: 'No estás en esta mesa' });
+
+  await db.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [seat.stack, userId]);
+  await db.query(
+    'INSERT INTO wallet_history (user_id, type, amount) VALUES ($1, $2, $3)',
+    [userId, 'holdem-cashout', seat.stack]
+  );
+
+  holdemStore.removeSeat(table.id, userId);
+
+  if (table.seats.length === 0) {
+    holdemStore.remove(table.id);
+  }
+
+  res.json({ ok: true });
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function tableToSummary(t) {
@@ -148,4 +172,4 @@ function tableToDetail(t) {
   };
 }
 
-module.exports = { listTables, getTable, createTable, joinTable, rebuy };
+module.exports = { listTables, getTable, createTable, joinTable, rebuy, leaveTable };

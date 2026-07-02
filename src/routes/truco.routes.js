@@ -7,5 +7,6 @@ router.use(auth);
 router.get('/list', c.listTables);
 router.post('/create', c.createTable);
 router.post('/join/:id', c.joinTable);
+router.post('/leave/:id', c.leaveTable);
 
 module.exports = router;

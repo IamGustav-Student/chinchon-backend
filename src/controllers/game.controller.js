@@ -67,4 +67,27 @@ function getTable(req, res) {
   res.json(table);
 }
 
-module.exports = { listTables, createTable, joinTable, getTable };
+function leaveTable(req, res) {
+  const table = tableStore.get(req.params.id);
+  if (!table) return res.status(404).json({ error: 'Mesa no encontrada' });
+  if (table.status !== 'waiting') return res.status(400).json({ error: 'La partida ya comenzó' });
+  if (!table.players.includes(req.user.id)) return res.status(400).json({ error: 'No estás en esta mesa' });
+
+  table.players = table.players.filter(id => id !== req.user.id);
+  delete table.playerNames[req.user.id];
+  delete table.playerAvatars[req.user.id];
+
+  if (table.players.length === 0) {
+    tableStore.remove(table.id);
+  } else {
+    const updated = tableStore.update(table.id, table);
+    const { sendToUser } = require('../websocket/game.ws');
+    for (const playerId of updated.players) {
+      sendToUser(playerId, { event: 'game-state', data: updated });
+    }
+  }
+
+  res.json({ ok: true });
+}
+
+module.exports = { listTables, createTable, joinTable, getTable, leaveTable };
