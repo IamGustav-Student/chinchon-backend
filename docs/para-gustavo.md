@@ -1389,3 +1389,226 @@ DELETE /api/friends/:userId
 ```
 
 Por ahora no es prioritario.
+
+---
+
+## Fase 9 — Panel de Administración
+
+El frontend tiene una nueva ruta `/admin` protegida por `adminGuard` que verifica `user.role === 'admin'`. Todos los endpoints de esta fase deben estar protegidos por un middleware que valide `role === 'admin'` en el JWT.
+
+---
+
+### 1. Campo `role` en usuarios
+
+Agregar columna `role VARCHAR(20) NOT NULL DEFAULT 'user'` en la tabla `users`. Los valores posibles son `'user'` y `'admin'`.
+
+Incluir `role` en todas las respuestas de auth y perfil:
+
+```json
+// Respuesta de /api/auth/login y /api/auth/register
+{ "token": "...", "user": { "id": 1, "username": "...", "role": "user" } }
+
+// Respuesta de GET /api/perfil
+{ ..., "role": "user" }
+```
+
+También aceptar `role` en `PUT /api/admin/users/:id/role`.
+
+---
+
+### 2. Endpoints del panel de administración
+
+Base: `GET|POST|PUT|DELETE /api/admin/*` — todos requieren JWT con `role === 'admin'`.
+
+#### 2.1 Estadísticas generales
+
+```
+GET /api/admin/stats
+```
+
+Respuesta:
+
+```json
+{
+  "totalUsers": 1240,
+  "activeUsers7d": 87,
+  "activeTables": 4,
+  "pendingDeposits": 3,
+  "weeklyRevenue": 50000,
+  "totalBalance": 840000
+}
+```
+
+- `totalUsers`: COUNT de la tabla `users`
+- `activeUsers7d`: usuarios que jugaron al menos 1 partida en los últimos 7 días
+- `activeTables`: mesas en estado `waiting` o `playing` de todos los juegos
+- `pendingDeposits`: depósitos con `status = 'pending'`
+- `weeklyRevenue`: suma de `amount * 0.20` (comisión del 20%) de las partidas finalizadas esta semana (lunes a domingo)
+- `totalBalance`: suma de `balance` de todos los usuarios
+
+---
+
+#### 2.2 Gestión de usuarios
+
+```
+GET    /api/admin/users?search=<string>&page=<number>
+PUT    /api/admin/users/:id/balance  { balance: number }
+PUT    /api/admin/users/:id/role     { role: 'user' | 'admin' }
+POST   /api/admin/users/:id/ban
+POST   /api/admin/users/:id/unban
+```
+
+Respuesta de `GET /api/admin/users`:
+
+```json
+{
+  "users": [
+    {
+      "id": 1,
+      "username": "juan",
+      "email": "juan@mail.com",
+      "avatar": "👨",
+      "balance": 15000,
+      "role": "user",
+      "banned": false,
+      "createdAt": "2026-01-15T10:00:00Z",
+      "gamesPlayed": 42,
+      "gamesWon": 18
+    }
+  ],
+  "total": 1240
+}
+```
+
+- `search`: filtra por `username` o `email` (ILIKE)
+- `page`: paginación de 20 usuarios por página
+- `banned`: columna `banned BOOLEAN DEFAULT FALSE` en la tabla `users`
+- Al banear: marcar `banned = TRUE`. Al verificar login, si `banned = TRUE`, devolver `403 Forbidden`
+- `balance` editable: sobrescribe el balance directamente (registrar el cambio en `wallet_history` con type `'admin-adjustment'`)
+
+---
+
+#### 2.3 Gestión de depósitos
+
+```
+GET  /api/admin/deposits?status=pending|approved|rejected
+POST /api/admin/deposits/:id/approve
+POST /api/admin/deposits/:id/reject
+```
+
+Tabla necesaria (si no existe ya):
+
+```sql
+CREATE TABLE deposits (
+  id              SERIAL PRIMARY KEY,
+  user_id         INT NOT NULL REFERENCES users(id),
+  amount          NUMERIC NOT NULL,
+  sender_name     TEXT NOT NULL,
+  sender_bank     TEXT NOT NULL,
+  transaction_id  TEXT NOT NULL,
+  status          VARCHAR(20) NOT NULL DEFAULT 'pending',
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  resolved_at     TIMESTAMPTZ
+);
+```
+
+El endpoint `POST /api/perfil/deposit` (Fase Extra) debe crear un registro en esta tabla con `status = 'pending'` en lugar de acreditar automáticamente.
+
+Al **aprobar** (`/approve`):
+1. `UPDATE deposits SET status = 'approved', resolved_at = NOW() WHERE id = :id`
+2. `UPDATE users SET balance = balance + amount WHERE id = user_id`
+3. Insertar en `wallet_history` con `type = 'deposit'`
+
+Al **rechazar** (`/reject`):
+1. `UPDATE deposits SET status = 'rejected', resolved_at = NOW() WHERE id = :id`
+2. No modificar el balance
+
+Respuesta de `GET /api/admin/deposits`:
+
+```json
+[
+  {
+    "id": 5,
+    "userId": 12,
+    "username": "maria",
+    "amount": 5000,
+    "senderName": "Maria García",
+    "senderBank": "Mercado Pago",
+    "transactionId": "TX-123456",
+    "status": "pending",
+    "createdAt": "2026-06-28T14:22:00Z"
+  }
+]
+```
+
+---
+
+#### 2.4 Gestión de mesas activas
+
+```
+GET    /api/admin/tables
+DELETE /api/admin/tables/:id
+```
+
+Respuesta de `GET /api/admin/tables`:
+
+```json
+[
+  {
+    "id": "abc123",
+    "game": "chinchon",
+    "status": "playing",
+    "playerCount": 2,
+    "maxPlayers": 4,
+    "buyIn": 1000,
+    "createdAt": "2026-06-28T20:00:00Z"
+  }
+]
+```
+
+- `game`: `'chinchon' | 'holdem' | 'truco'`
+- `DELETE /api/admin/tables/:id`: cierra la mesa forzosamente, desconecta a los jugadores (enviar evento WS `game-over` con mensaje de admin) y devuelve las apuestas
+
+---
+
+#### 2.5 Control del torneo
+
+```
+GET  /api/admin/tournament
+POST /api/admin/tournament/start   → fuerza inicio aunque no haya mínimo de inscriptos
+POST /api/admin/tournament/cancel  → cancela y devuelve inscripciones
+```
+
+Respuesta de `GET /api/admin/tournament`:
+
+```json
+{
+  "id": "tournament-abc",
+  "status": "registration_open",
+  "registeredCount": 5,
+  "minPlayers": 8,
+  "prizePool": 5000,
+  "startsAt": "2026-07-05T21:00:00Z"
+}
+```
+
+---
+
+### 3. Seguridad del panel de admin
+
+- El middleware de admin debe verificar el JWT **y** que `users.role = 'admin'` en la base de datos, no solo en el payload del token (por si el rol cambia después de emitir el token).
+- Las acciones de admin deben quedar registradas en una tabla de auditoría:
+
+```sql
+CREATE TABLE admin_actions (
+  id          SERIAL PRIMARY KEY,
+  admin_id    INT NOT NULL REFERENCES users(id),
+  action      TEXT NOT NULL,
+  target_type TEXT,
+  target_id   TEXT,
+  detail      JSONB,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+Ejemplos de acciones a registrar: `'ban_user'`, `'unban_user'`, `'edit_balance'`, `'approve_deposit'`, `'reject_deposit'`, `'close_table'`, `'start_tournament'`, `'cancel_tournament'`.
