@@ -691,8 +691,8 @@ Torneos automáticos todos los **sábados a las 18:00 hs (ART = UTC-3)**.
 | Tamaño de mesas | 3 o 4 jugadores (ver algoritmo de distribución) |
 | Eliminación | Continua — 1 ganador por mesa, avanza al siguiente round |
 | Reconexión | 50 segundos para reconectarse; si no vuelve, pierde por forfeit |
-| Premio campeón | 70% del pozo |
-| Premio finalista | 10% del pozo |
+| Premio campeón | 60% del pozo |
+| Premio finalista | 20% del pozo |
 | Comisión plataforma | 20% del pozo |
 | Inscripción cierra | 5 minutos antes de comenzar (17:55 ART) |
 | Inscripción abre | 24 horas antes (viernes 18:00 ART) |
@@ -858,8 +858,8 @@ Se emite cuando el torneo termina (queda 1 ganador de la final).
 ```
 
 Acreditar los premios automáticamente:
-- Ganador: +70% del pozo
-- Finalista: +10% del pozo
+- Ganador: +60% del pozo
+- Finalista: +20% del pozo
 - Los $1.000 × 20% quedan como comisión (no se devuelven)
 
 #### `tournament-cancelled`
