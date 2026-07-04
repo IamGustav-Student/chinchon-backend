@@ -35,8 +35,8 @@ async function getCurrent(req, res) {
     minPlayers: t.minPlayers,
     isRegistered: t.registrations.has(req.user.id),
     prizePool,
-    winnerPrize: Math.floor(prizePool * 0.7),
-    finalistPrize: Math.floor(prizePool * 0.1),
+    winnerPrize: Math.floor(prizePool * 0.6),
+    finalistPrize: Math.floor(prizePool * 0.2),
   };
 
   if (t.status === 'registration_open') {
@@ -155,8 +155,8 @@ async function getResult(req, res) {
       finalistId: t.finalistId,
       finalistUsername: t.registrations.get(t.finalistId)?.username ?? 'Desconocido',
       prizePool,
-      winnerPrize: Math.floor(prizePool * 0.7),
-      finalistPrize: Math.floor(prizePool * 0.1),
+      winnerPrize: Math.floor(prizePool * 0.6),
+      finalistPrize: Math.floor(prizePool * 0.2),
       totalPlayers: t.registrations.size,
     });
   }
@@ -179,8 +179,8 @@ async function getResult(req, res) {
       finalistId: r.finalist_id,
       finalistUsername: r.finalist_username,
       prizePool: r.prize_pool,
-      winnerPrize: Math.floor(r.prize_pool * 0.7),
-      finalistPrize: Math.floor(r.prize_pool * 0.1),
+      winnerPrize: Math.floor(r.prize_pool * 0.6),
+      finalistPrize: Math.floor(r.prize_pool * 0.2),
       totalPlayers: r.total_players,
     });
   } catch {

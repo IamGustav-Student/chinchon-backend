@@ -4,6 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const tables = new Map();
 
 const BLIND_MAP = {
+  0:     { small: 0,   big: 0   },
   500:   { small: 5,   big: 10  },
   1000:  { small: 10,  big: 20  },
   5000:  { small: 50,  big: 100 },

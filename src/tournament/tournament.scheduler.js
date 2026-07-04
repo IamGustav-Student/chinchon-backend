@@ -192,8 +192,8 @@ async function finishTournament(t, winnerId, finalistId) {
   t.finalistId = finalistId;
 
   const prizePool = t.registrations.size * t.entryFee;
-  const winnerPrize = Math.floor(prizePool * 0.7);
-  const finalistPrize = Math.floor(prizePool * 0.1);
+  const winnerPrize = Math.floor(prizePool * 0.6);
+  const finalistPrize = Math.floor(prizePool * 0.2);
 
   try {
     await db.query('BEGIN');

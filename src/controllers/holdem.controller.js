@@ -1,7 +1,7 @@
 const db = require('../models/db');
 const holdemStore = require('../models/holdem.store');
 
-const VALID_BUYINS = [500, 1000, 5000, 25000];
+const VALID_BUYINS = [0, 500, 1000, 5000, 25000];
 
 async function listTables(req, res) {
   const tables = holdemStore.getAll().filter(t => t.status !== 'finished');
@@ -31,14 +31,16 @@ async function createTable(req, res) {
   // Check balance
   const { rows } = await db.query('SELECT balance, avatar FROM users WHERE id = $1', [userId]);
   if (!rows[0]) return res.status(404).json({ error: 'Usuario no encontrado' });
-  if (rows[0].balance < buyIn) return res.status(400).json({ error: 'Saldo insuficiente' });
+  if (buyIn > 0 && rows[0].balance < buyIn) return res.status(400).json({ error: 'Saldo insuficiente' });
 
-  // Deduct buy-in
-  await db.query('UPDATE users SET balance = balance - $1 WHERE id = $2', [buyIn, userId]);
-  await db.query(
-    'INSERT INTO wallet_history (user_id, type, amount) VALUES ($1, $2, $3)',
-    [userId, 'holdem-buyin', -buyIn]
-  );
+  // Deduct buy-in (las mesas gratuitas no mueven saldo real)
+  if (buyIn > 0) {
+    await db.query('UPDATE users SET balance = balance - $1 WHERE id = $2', [buyIn, userId]);
+    await db.query(
+      'INSERT INTO wallet_history (user_id, type, amount) VALUES ($1, $2, $3)',
+      [userId, 'holdem-buyin', -buyIn]
+    );
+  }
 
   const table = holdemStore.create({
     buyIn,
@@ -75,14 +77,16 @@ async function joinTable(req, res) {
   // Check balance
   const { rows } = await db.query('SELECT balance, avatar FROM users WHERE id = $1', [userId]);
   if (!rows[0]) return res.status(404).json({ error: 'Usuario no encontrado' });
-  if (rows[0].balance < table.buyIn) return res.status(400).json({ error: 'Saldo insuficiente' });
+  if (table.buyIn > 0 && rows[0].balance < table.buyIn) return res.status(400).json({ error: 'Saldo insuficiente' });
 
-  // Deduct buy-in
-  await db.query('UPDATE users SET balance = balance - $1 WHERE id = $2', [table.buyIn, userId]);
-  await db.query(
-    'INSERT INTO wallet_history (user_id, type, amount) VALUES ($1, $2, $3)',
-    [userId, 'holdem-buyin', -table.buyIn]
-  );
+  // Deduct buy-in (las mesas gratuitas no mueven saldo real)
+  if (table.buyIn > 0) {
+    await db.query('UPDATE users SET balance = balance - $1 WHERE id = $2', [table.buyIn, userId]);
+    await db.query(
+      'INSERT INTO wallet_history (user_id, type, amount) VALUES ($1, $2, $3)',
+      [userId, 'holdem-buyin', -table.buyIn]
+    );
+  }
 
   holdemStore.addSeat(table.id, {
     userId,
@@ -100,6 +104,7 @@ async function rebuy(req, res) {
 
   const seat = table.seats.find(s => s.userId === userId);
   if (!seat) return res.status(400).json({ error: 'No estás en esta mesa' });
+  if (table.buyIn === 0) return res.status(400).json({ error: 'Las mesas gratuitas no tienen recompras' });
   if (seat.stack > 0) return res.status(400).json({ error: 'Aún tenés fichas' });
   if (seat.rebuysUsed >= table.maxRebuys) return res.status(400).json({ error: 'Recompras agotadas' });
 
@@ -130,11 +135,13 @@ async function leaveTable(req, res) {
   const seat = table.seats.find(s => s.userId === userId);
   if (!seat) return res.status(400).json({ error: 'No estás en esta mesa' });
 
-  await db.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [seat.stack, userId]);
-  await db.query(
-    'INSERT INTO wallet_history (user_id, type, amount) VALUES ($1, $2, $3)',
-    [userId, 'holdem-cashout', seat.stack]
-  );
+  if (table.buyIn > 0 && seat.stack > 0) {
+    await db.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [seat.stack, userId]);
+    await db.query(
+      'INSERT INTO wallet_history (user_id, type, amount) VALUES ($1, $2, $3)',
+      [userId, 'holdem-cashout', seat.stack]
+    );
+  }
 
   holdemStore.removeSeat(table.id, userId);
 
