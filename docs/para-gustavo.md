@@ -1734,3 +1734,69 @@ El frontend ahora permite crear mesas de Hold'em con `buyIn: 0` (opción "Gratis
 - **Recompra**: sin recompras en mesas gratuitas (o ignorarlas).
 
 El frontend envía `{ buyIn: 0, maxPlayers: 4 }` en el POST de creación. Verificar que la validación no rechace `buyIn: 0`.
+
+
+---
+
+## FASE — Sistema de Closet (Tienda de Cosméticos)
+
+El frontend implementó el Closet de avatares. Los usuarios pueden equipar ropa, gorros y accesorios sobre su avatar SVG. Las prendas gratuitas funcionan sin backend. Las prendas de pago **temporalmente se gestionan en localStorage** — necesitamos persistencia real del lado del servidor.
+
+### Nuevos campos en la respuesta de `/api/perfil`
+
+Agregar al objeto usuario devuelto por `GET /api/perfil`:
+
+```json
+{
+  "ownedItems": ["hoodie_gold", "cap_red", "sunglasses"]
+}
+```
+
+Cuando el usuario no tiene ítems comprados → devolver `"ownedItems": []`.
+
+### Nuevo endpoint de compra
+
+```
+POST /api/perfil/purchase-item
+Authorization: Bearer <token>
+Body: { "itemId": "hoodie_gold" }
+```
+
+**Lógica del servidor:**
+1. Verificar que `itemId` sea un ítem válido (ver tabla de precios abajo).
+2. Verificar que el usuario tenga saldo suficiente en `balance`.
+3. Descontar el precio del `balance`.
+4. Agregar `itemId` al array `ownedItems` del usuario en la base de datos.
+5. Devolver `{ balance: <nuevo_balance>, ownedItems: [...] }`.
+
+Si el ítem ya está en `ownedItems` → devolver 400 con error `"Ya tenés este ítem"`.
+Si saldo insuficiente → devolver 400 con error `"Saldo insuficiente"`.
+
+### Tabla de precios de ítems (referencia para validación server-side)
+
+| itemId         | tipo        | precio  |
+|----------------|-------------|---------|
+| tshirt_white   | top         | $0      |
+| tshirt_black   | top         | $0      |
+| hoodie_gold    | top         | $500    |
+| jersey_blue    | top         | $300    |
+| tuxedo         | top         | $1.000  |
+| cap_black      | hat         | $200    |
+| cap_red        | hat         | $200    |
+| beanie_red     | hat         | $300    |
+| crown_gold     | hat         | $1.500  |
+| glasses        | acc         | $0      |
+| sunglasses     | acc         | $400    |
+
+Los ítems con precio $0 no necesitan pasar por `/purchase-item` — el frontend los trata como siempre disponibles.
+
+### Estado actual del frontend
+
+- ✅ El avatar SVG soporta capas: `top` (remera/buzo/esmoquin), `hat` (gorra/beanie/corona), `acc` (anteojos/lentes de sol)
+- ✅ El campo `AvatarConfig` guardado en `PUT /api/perfil → { avatar: "..." }` ya incluye los nuevos campos `top` y `hat`
+- ⚠️ Los ítems pagos actualmente se guardan en `localStorage` como mock — reemplazar con la respuesta de `GET /api/perfil` cuando implementes `ownedItems`
+- ⚠️ La compra optimista deduce del balance del signal pero **no llama a ningún endpoint** todavía — conectar al nuevo `POST /api/perfil/purchase-item` cuando esté disponible
+
+### Migración de base de datos necesaria
+
+Agregar columna `owned_items TEXT DEFAULT '[]'` (JSON array serializado) a la tabla de usuarios, o usar una tabla relacional separada `user_items (user_id, item_id, purchased_at)`.
