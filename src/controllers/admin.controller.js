@@ -52,7 +52,7 @@ async function getUsers(req, res) {
 async function banUser(req, res) {
   try {
     await db.query('UPDATE users SET banned = true WHERE id = $1', [req.params.id]);
-    await logAction(req.user.id, 'ban_user', 'user', req.params.id, {});
+    await logAction(req.user.id, 'ban_user', 'user', req.params.id, {}, req);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -62,7 +62,7 @@ async function banUser(req, res) {
 async function unbanUser(req, res) {
   try {
     await db.query('UPDATE users SET banned = false WHERE id = $1', [req.params.id]);
-    await logAction(req.user.id, 'unban_user', 'user', req.params.id, {});
+    await logAction(req.user.id, 'unban_user', 'user', req.params.id, {}, req);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -82,7 +82,7 @@ async function editBalance(req, res) {
         [req.params.id, diff]
       );
     }
-    await logAction(req.user.id, 'edit_balance', 'user', req.params.id, { balance, diff });
+    await logAction(req.user.id, 'edit_balance', 'user', req.params.id, { valorAnterior: prev.rows[0]?.balance ?? 0, valorNuevo: balance, diff }, req);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -94,7 +94,43 @@ async function setRole(req, res) {
     const { role } = req.body;
     if (!['user', 'admin'].includes(role)) return res.status(400).json({ error: 'Rol inválido' });
     await db.query('UPDATE users SET is_admin = $1 WHERE id = $2', [role === 'admin', req.params.id]);
-    await logAction(req.user.id, 'set_role', 'user', req.params.id, { role });
+    await logAction(req.user.id, 'set_role', 'user', req.params.id, { role }, req);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+async function updateEmail(req, res) {
+  const { email } = req.body;
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: 'Email inválido' });
+  }
+  const normalized = email.trim().toLowerCase();
+
+  try {
+    const outcome = await db.withTransaction(async (client) => {
+      const prev = await client.query('SELECT email FROM users WHERE id = $1 FOR UPDATE', [req.params.id]);
+      if (!prev.rows[0]) return { status: 404, error: 'Usuario no encontrado' };
+
+      const dup = await client.query('SELECT id FROM users WHERE email = $1 AND id != $2', [normalized, req.params.id]);
+      if (dup.rows[0]) return { status: 409, error: 'Ese email ya está registrado' };
+
+      await client.query('UPDATE users SET email = $1 WHERE id = $2', [normalized, req.params.id]);
+      await client.query(
+        `INSERT INTO admin_actions (admin_id, action, target_type, target_id, detail, ip_address, user_agent)
+         VALUES ($1,'update_email','user',$2,$3,$4,$5)`,
+        [
+          req.user.id, req.params.id,
+          { valorAnterior: prev.rows[0].email, valorNuevo: normalized },
+          req.headers['x-forwarded-for']?.split(',')[0].trim() ?? req.socket?.remoteAddress ?? null,
+          req.headers['user-agent'] ?? null,
+        ]
+      );
+      return { status: 200 };
+    });
+
+    if (outcome.status !== 200) return res.status(outcome.status).json({ error: outcome.error });
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -126,32 +162,35 @@ async function getDeposits(req, res) {
   }
 }
 
-async function logAction(adminId, action, targetType, targetId, detail) {
+async function logAction(adminId, action, targetType, targetId, detail, req) {
   try {
+    const ip = req?.headers['x-forwarded-for']?.split(',')[0].trim() ?? req?.socket?.remoteAddress ?? null;
+    const userAgent = req?.headers['user-agent'] ?? null;
     await db.query(
-      `INSERT INTO admin_actions (admin_id, action, target_type, target_id, detail) VALUES ($1,$2,$3,$4,$5)`,
-      [adminId, action, targetType, String(targetId), detail]
+      `INSERT INTO admin_actions (admin_id, action, target_type, target_id, detail, ip_address, user_agent)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [adminId, action, targetType, String(targetId), detail, ip, userAgent]
     );
   } catch (_) {}
 }
 
 async function approveDeposit(req, res) {
   try {
-    await db.query('BEGIN');
-    const dep = await db.query('SELECT * FROM deposit_requests WHERE id = $1 FOR UPDATE', [req.params.id]);
-    const d = dep.rows[0];
-    if (!d || d.approved || d.rejected) {
-      await db.query('ROLLBACK');
-      return res.status(400).json({ error: 'Depósito no válido o ya procesado' });
-    }
-    await db.query('UPDATE deposit_requests SET approved = true WHERE id = $1', [d.id]);
-    await db.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [d.amount, d.user_id]);
-    await db.query(`INSERT INTO wallet_history (user_id, type, amount) VALUES ($1, 'deposit', $2)`, [d.user_id, d.amount]);
-    await db.query('COMMIT');
-    await logAction(req.user.id, 'approve_deposit', 'deposit', req.params.id, { amount: d.amount });
+    const outcome = await db.withTransaction(async (client) => {
+      const dep = await client.query('SELECT * FROM deposit_requests WHERE id = $1 FOR UPDATE', [req.params.id]);
+      const d = dep.rows[0];
+      if (!d || d.approved || d.rejected) return { status: 400, error: 'Depósito no válido o ya procesado' };
+
+      await client.query('UPDATE deposit_requests SET approved = true WHERE id = $1', [d.id]);
+      await client.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [d.amount, d.user_id]);
+      await client.query(`INSERT INTO wallet_history (user_id, type, amount) VALUES ($1, 'deposit', $2)`, [d.user_id, d.amount]);
+      return { status: 200, amount: d.amount };
+    });
+
+    if (outcome.status !== 200) return res.status(outcome.status).json({ error: outcome.error });
+    await logAction(req.user.id, 'approve_deposit', 'deposit', req.params.id, { amount: outcome.amount }, req);
     res.json({ ok: true });
   } catch (err) {
-    await db.query('ROLLBACK');
     res.status(500).json({ error: err.message });
   }
 }
@@ -159,7 +198,7 @@ async function approveDeposit(req, res) {
 async function rejectDeposit(req, res) {
   try {
     await db.query('UPDATE deposit_requests SET rejected = true WHERE id = $1', [req.params.id]);
-    await logAction(req.user.id, 'reject_deposit', 'deposit', req.params.id, {});
+    await logAction(req.user.id, 'reject_deposit', 'deposit', req.params.id, {}, req);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -229,7 +268,7 @@ async function cancelTournament(req, res) {
 }
 
 module.exports = {
-  getStats, getUsers, banUser, unbanUser, editBalance, setRole,
+  getStats, getUsers, banUser, unbanUser, editBalance, setRole, updateEmail,
   getDeposits, approveDeposit, rejectDeposit,
   getTables, closeTable,
   getTournament, startTournament, cancelTournament,

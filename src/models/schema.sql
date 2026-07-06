@@ -194,7 +194,7 @@ BEGIN
 EXCEPTION WHEN duplicate_column THEN NULL;
 END$$;
 
--- Migración: tipos admin-adjustment y truco-buyin/cashout en wallet_history
+-- Migración: tipos admin-adjustment, truco-buyin/cashout y shop-purchase en wallet_history
 DO $$
 BEGIN
   ALTER TABLE wallet_history DROP CONSTRAINT IF EXISTS wallet_history_type_check;
@@ -205,7 +205,26 @@ BEGIN
       'tournament-entry', 'tournament-refund', 'tournament-win', 'tournament-finalist',
       'holdem-buyin', 'holdem-cashout',
       'truco-buyin', 'truco-cashout',
-      'admin-adjustment'
+      'admin-adjustment', 'shop-purchase'
     ));
 EXCEPTION WHEN others THEN NULL;
+END$$;
+
+-- Migración: owned_items (Closet de cosméticos) en usuarios
+DO $$
+BEGIN
+  ALTER TABLE users ADD COLUMN owned_items JSONB NOT NULL DEFAULT '[]'::jsonb;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END$$;
+
+-- Migración: columnas ip_address/user_agent en admin_actions (auditoría reforzada)
+DO $$
+BEGIN
+  ALTER TABLE admin_actions ADD COLUMN ip_address INET;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END$$;
+DO $$
+BEGIN
+  ALTER TABLE admin_actions ADD COLUMN user_agent TEXT;
+EXCEPTION WHEN duplicate_column THEN NULL;
 END$$;
