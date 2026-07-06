@@ -1800,3 +1800,289 @@ Los ítems con precio $0 no necesitan pasar por `/purchase-item` — el frontend
 ### Migración de base de datos necesaria
 
 Agregar columna `owned_items TEXT DEFAULT '[]'` (JSON array serializado) a la tabla de usuarios, o usar una tabla relacional separada `user_items (user_id, item_id, purchased_at)`.
+
+---
+
+## Seguridad del Panel de Administración
+
+Esta sección documenta los requisitos de seguridad que el backend debe implementar obligatoriamente para blindar todos los endpoints `/api/admin/*`.
+
+---
+
+### 1. Middleware `verificarAdmin`
+
+Crear un middleware dedicado que proteja **todas** las rutas bajo `/api/admin/*`. Debe ejecutarse después de `verificarToken` (el middleware JWT existente).
+
+**Archivo sugerido:** `src/middlewares/verificarAdmin.js`
+
+```js
+const { Pool } = require('pg');
+const pool = new Pool(); // usa la conexión ya configurada en el proyecto
+
+/**
+ * Middleware que verifica que el usuario autenticado tiene rol 'admin'
+ * consultando directamente la base de datos — no confía solo en el JWT.
+ *
+ * Requisito previo: verificarToken debe haber corrido antes y adjuntado
+ * req.usuario = { id, email, role } al request.
+ */
+async function verificarAdmin(req, res, next) {
+  try {
+    const userId = req.usuario?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'No autenticado.' });
+    }
+
+    // Re-consulta en DB: el JWT puede estar desactualizado si el rol cambió
+    const { rows } = await pool.query(
+      'SELECT rol, baneado FROM usuarios WHERE id = $1 LIMIT 1',
+      [userId]
+    );
+
+    const usuario = rows[0];
+
+    if (!usuario) {
+      return res.status(401).json({ error: 'Usuario no encontrado.' });
+    }
+    if (usuario.baneado) {
+      return res.status(403).json({ error: 'Cuenta suspendida.' });
+    }
+    if (usuario.rol !== 'admin') {
+      // No revelar que /admin existe — responder igual que un 404
+      return res.status(403).json({ error: 'Acceso no autorizado.' });
+    }
+
+    next();
+  } catch (err) {
+    console.error('[verificarAdmin]', err);
+    return res.status(500).json({ error: 'Error interno de servidor.' });
+  }
+}
+
+module.exports = verificarAdmin;
+```
+
+**Cómo registrarlo en el router de admin:**
+
+```js
+const { verificarToken }  = require('../middlewares/verificarToken');
+const verificarAdmin      = require('../middlewares/verificarAdmin');
+
+// Aplica ambos middlewares a TODAS las rutas del router de admin
+router.use(verificarToken, verificarAdmin);
+
+// A partir de acá, todas las rutas del archivo están protegidas
+router.get('/stats',          getStats);
+router.get('/users',          getUsers);
+router.put('/users/:id/username', updateUsername);
+router.put('/users/:id/email',    updateEmail);
+// ... etc
+```
+
+**Por qué re-consultar la DB en lugar de leer el JWT:**
+El JWT tiene TTL de horas. Si un admin es degradado a `user` durante su sesión activa, su token sigue diciendo `role: admin`. La consulta a DB corta ese vector de ataque inmediatamente.
+
+---
+
+### 2. Tabla de auditoría `admin_logs`
+
+Cada operación sensible que un admin ejecute debe quedar registrada para auditoría. Crear la tabla antes de conectar el frontend.
+
+**Migración SQL:**
+
+```sql
+CREATE TABLE IF NOT EXISTS admin_logs (
+  id                BIGSERIAL PRIMARY KEY,
+  admin_id          INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE SET NULL,
+  usuario_afectado  INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+  accion            VARCHAR(60) NOT NULL,
+  -- Ejemplos de accion: 'CAMBIO_EMAIL', 'CAMBIO_USERNAME', 'AJUSTE_SALDO',
+  --   'INYECTAR_SALDO', 'BLANQUEO_CLAVE', 'BAN_USUARIO', 'UNBAN_USUARIO',
+  --   'CAMBIO_ROL', 'CERRAR_MESA', 'FORZAR_TORNEO', 'CANCELAR_TORNEO'
+  valor_anterior    TEXT,
+  valor_nuevo       TEXT,
+  ip_origen         INET,
+  user_agent        TEXT,
+  creado_en         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Índices para consultas de auditoría
+CREATE INDEX IF NOT EXISTS idx_admin_logs_admin      ON admin_logs(admin_id);
+CREATE INDEX IF NOT EXISTS idx_admin_logs_afectado   ON admin_logs(usuario_afectado);
+CREATE INDEX IF NOT EXISTS idx_admin_logs_accion      ON admin_logs(accion);
+CREATE INDEX IF NOT EXISTS idx_admin_logs_creado_en  ON admin_logs(creado_en DESC);
+```
+
+**Función auxiliar para insertar logs (usar en todos los handlers):**
+
+```js
+/**
+ * @param {object} opts
+ * @param {number}      opts.adminId          - ID del admin que ejecuta
+ * @param {number|null} opts.usuarioAfectado  - ID del usuario afectado (null si es acción global)
+ * @param {string}      opts.accion           - Código de acción en MAYUS_SNAKE
+ * @param {string|null} opts.valorAnterior
+ * @param {string|null} opts.valorNuevo
+ * @param {import('express').Request} opts.req - Para extraer IP y UA
+ */
+async function registrarLog({ adminId, usuarioAfectado = null, accion, valorAnterior = null, valorNuevo = null, req }) {
+  const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() ?? req.socket.remoteAddress;
+  const ua = req.headers['user-agent'] ?? null;
+  await pool.query(
+    `INSERT INTO admin_logs
+       (admin_id, usuario_afectado, accion, valor_anterior, valor_nuevo, ip_origen, user_agent)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [adminId, usuarioAfectado, accion, valorAnterior, valorNuevo, ip, ua]
+  );
+}
+```
+
+**Ejemplo de uso en el handler de cambio de email:**
+
+```js
+async function updateEmail(req, res) {
+  const { id } = req.params;
+  const { email: emailNuevo } = req.body;
+
+  // Validar formato básico
+  if (!emailNuevo || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNuevo)) {
+    return res.status(400).json({ error: 'Email inválido.' });
+  }
+
+  // Verificar que el email no esté en uso por otro usuario
+  const { rows: existente } = await pool.query(
+    'SELECT id FROM usuarios WHERE email = $1 AND id != $2',
+    [emailNuevo.toLowerCase(), id]
+  );
+  if (existente.length > 0) {
+    return res.status(409).json({ error: 'Ese email ya está registrado.' });
+  }
+
+  // Leer valor anterior para el log
+  const { rows: antes } = await pool.query(
+    'SELECT email FROM usuarios WHERE id = $1',
+    [id]
+  );
+  const emailAnterior = antes[0]?.email ?? null;
+
+  // Actualizar
+  await pool.query(
+    'UPDATE usuarios SET email = $1 WHERE id = $2',
+    [emailNuevo.toLowerCase(), id]
+  );
+
+  // Registrar en auditoría
+  await registrarLog({
+    adminId:         req.usuario.id,
+    usuarioAfectado: parseInt(id),
+    accion:          'CAMBIO_EMAIL',
+    valorAnterior:   emailAnterior,
+    valorNuevo:      emailNuevo.toLowerCase(),
+    req,
+  });
+
+  return res.json({ ok: true });
+}
+```
+
+**Ejemplo de uso en el handler de cambio de username:**
+
+```js
+async function updateUsername(req, res) {
+  const { id } = req.params;
+  const { username: usernameNuevo } = req.body;
+
+  if (!usernameNuevo || usernameNuevo.trim().length < 2) {
+    return res.status(400).json({ error: 'Nombre de usuario demasiado corto.' });
+  }
+
+  const { rows: antes } = await pool.query(
+    'SELECT username FROM usuarios WHERE id = $1', [id]
+  );
+  const usernameAnterior = antes[0]?.username ?? null;
+
+  await pool.query(
+    'UPDATE usuarios SET username = $1 WHERE id = $2',
+    [usernameNuevo.trim(), id]
+  );
+
+  await registrarLog({
+    adminId:         req.usuario.id,
+    usuarioAfectado: parseInt(id),
+    accion:          'CAMBIO_USERNAME',
+    valorAnterior:   usernameAnterior,
+    valorNuevo:      usernameNuevo.trim(),
+    req,
+  });
+
+  return res.json({ ok: true });
+}
+```
+
+**Ejemplo en inyección de saldo:**
+
+```js
+async function injectBalance(req, res) {
+  const { id } = req.params;
+  const { amount } = req.body;
+
+  if (!amount || amount <= 0) {
+    return res.status(400).json({ error: 'Monto inválido.' });
+  }
+
+  const { rows: antes } = await pool.query(
+    'SELECT balance FROM usuarios WHERE id = $1', [id]
+  );
+  const balanceAnterior = antes[0]?.balance ?? 0;
+
+  await pool.query(
+    'UPDATE usuarios SET balance = balance + $1 WHERE id = $2',
+    [amount, id]
+  );
+
+  await registrarLog({
+    adminId:         req.usuario.id,
+    usuarioAfectado: parseInt(id),
+    accion:          'INYECTAR_SALDO',
+    valorAnterior:   String(balanceAnterior),
+    valorNuevo:      String(balanceAnterior + amount),
+    req,
+  });
+
+  return res.json({ ok: true });
+}
+```
+
+**Acciones que DEBEN registrar log** (aplicar el mismo patrón a todos):
+
+| Acción | Código |
+|---|---|
+| Cambiar email | `CAMBIO_EMAIL` |
+| Cambiar username | `CAMBIO_USERNAME` |
+| Inyectar saldo | `INYECTAR_SALDO` |
+| Editar saldo absoluto | `AJUSTE_SALDO` |
+| Blanquear contraseña | `BLANQUEO_CLAVE` |
+| Banear usuario | `BAN_USUARIO` |
+| Desbanear usuario | `UNBAN_USUARIO` |
+| Cambiar rol | `CAMBIO_ROL` |
+| Forzar aprobación depósito | `APROBAR_DEPOSITO` |
+| Rechazar depósito | `RECHAZAR_DEPOSITO` |
+| Cerrar mesa activa | `CERRAR_MESA` |
+| Forzar inicio torneo | `FORZAR_TORNEO` |
+| Cancelar torneo | `CANCELAR_TORNEO` |
+
+---
+
+### 3. Nuevos endpoints que el frontend ya consume
+
+```
+PUT  /api/admin/users/:id/email   { email }   → actualiza email + log CAMBIO_EMAIL
+```
+
+(Todos los demás endpoints de `/api/admin/*` ya estaban documentados en secciones anteriores.)
+
+**Validaciones mínimas requeridas en todos los endpoints `/api/admin/*`:**
+- El campo `:id` debe ser un entero positivo válido. Si no, responder 400.
+- Sanitizar todos los strings contra XSS antes de persistir.
+- Rate limiting: máximo **30 requests por minuto por IP** en rutas admin (recomendado: `express-rate-limit`).
+- Los logs de auditoría deben escribirse **dentro de la misma transacción** que el UPDATE para garantizar consistencia.
