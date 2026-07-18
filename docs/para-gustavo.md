@@ -2086,3 +2086,59 @@ PUT  /api/admin/users/:id/email   { email }   → actualiza email + log CAMBIO_E
 - Sanitizar todos los strings contra XSS antes de persistir.
 - Rate limiting: máximo **30 requests por minuto por IP** en rutas admin (recomendado: `express-rate-limit`).
 - Los logs de auditoría deben escribirse **dentro de la misma transacción** que el UPDATE para garantizar consistencia.
+
+---
+
+## Recuperación de contraseña por email
+
+El frontend ya tiene la pantalla de recuperación de contraseña en `/login`. Falta el endpoint backend.
+
+### Endpoint nuevo: `POST /api/auth/forgot-password`
+
+**Request body:**
+```json
+{ "email": "usuario@ejemplo.com" }
+```
+
+**Comportamiento:**
+1. Buscar el usuario por email en la tabla `users`.
+2. Si existe, generar un token único (`crypto.randomBytes(32).toString('hex')`), guardarlo en una tabla `password_reset_tokens` con TTL de 1 hora y enviar un email con el link de reset.
+3. Si NO existe, responder igual que si existiera (evitar enumeración de cuentas).
+
+**Response (siempre 200, sin importar si el email existe o no):**
+```json
+{ "message": "Si el email existe, recibirás un link para restablecer tu contraseña." }
+```
+
+**Tabla requerida:**
+```sql
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  id          SERIAL PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token       VARCHAR(64) NOT NULL UNIQUE,
+  expires_at  TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '1 hour',
+  used        BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX ON password_reset_tokens(token);
+CREATE INDEX ON password_reset_tokens(user_id);
+```
+
+### Endpoint nuevo: `POST /api/auth/reset-password`
+
+**Request body:**
+```json
+{ "token": "<token del email>", "newPassword": "nuevaContraseña" }
+```
+
+**Comportamiento:**
+1. Buscar el token en `password_reset_tokens` donde `used = FALSE` y `expires_at > NOW()`.
+2. Si inválido o expirado → 400 con `{ "error": "Token inválido o expirado." }`.
+3. Si válido: actualizar la contraseña del usuario (hash con bcrypt), marcar `used = TRUE`, responder 200.
+
+**Response:**
+```json
+{ "message": "Contraseña restablecida correctamente." }
+```
+
+**Nota:** El frontend actualmente solo muestra el formulario de solicitud (enviar email). La pantalla para ingresar la nueva contraseña (usando el token del email) puede hacerse en una ruta `/reset-password?token=xxx` cuando quieras expandir ese flujo.
