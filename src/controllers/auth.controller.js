@@ -14,7 +14,7 @@ async function issuePasswordResetLink(userId) {
   const token = crypto.randomBytes(32).toString('hex');
   const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MS);
   await db.query(
-    'INSERT INTO password_resets (user_id, token, expires_at) VALUES ($1, $2, $3)',
+    'INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)',
     [userId, token, expiresAt]
   );
   const base = process.env.FRONTEND_URL || 'https://chinchon-frontend.vercel.app';
@@ -71,9 +71,10 @@ function logout(req, res) {
 
 async function forgotPassword(req, res) {
   const { email } = req.body;
-  // Siempre respondemos éxito, exista o no el email — evita revelar qué
-  // cuentas están registradas.
-  if (!email) return res.json({ ok: true });
+  const genericMessage = { message: 'Si el email existe, recibirás un link para restablecer tu contraseña.' };
+  // Siempre respondemos el mismo mensaje, exista o no el email — evita
+  // revelar qué cuentas están registradas.
+  if (!email) return res.json(genericMessage);
 
   try {
     const result = await db.query('SELECT id FROM users WHERE email = $1', [email.trim().toLowerCase()]);
@@ -83,7 +84,7 @@ async function forgotPassword(req, res) {
   } catch (err) {
     console.error('[forgot-password]', err.message);
   }
-  res.json({ ok: true });
+  res.json(genericMessage);
 }
 
 async function resetPassword(req, res) {
@@ -95,21 +96,21 @@ async function resetPassword(req, res) {
   try {
     const outcome = await db.withTransaction(async (client) => {
       const result = await client.query(
-        `SELECT id, user_id FROM password_resets
+        `SELECT id, user_id FROM password_reset_tokens
          WHERE token = $1 AND used = false AND expires_at > NOW() FOR UPDATE`,
         [token]
       );
       const reset = result.rows[0];
-      if (!reset) return { status: 400, error: 'El enlace es inválido o expiró' };
+      if (!reset) return { status: 400, error: 'Token inválido o expirado.' };
 
       const hash = await bcrypt.hash(newPassword, 10);
       await client.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, reset.user_id]);
-      await client.query('UPDATE password_resets SET used = true WHERE id = $1', [reset.id]);
+      await client.query('UPDATE password_reset_tokens SET used = true WHERE id = $1', [reset.id]);
       return { status: 200 };
     });
 
     if (outcome.status !== 200) return res.status(outcome.status).json({ error: outcome.error });
-    res.json({ ok: true });
+    res.json({ message: 'Contraseña restablecida correctamente.' });
   } catch (err) {
     res.status(500).json({ error: 'Error interno del servidor' });
   }
