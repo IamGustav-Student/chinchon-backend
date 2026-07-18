@@ -52,18 +52,6 @@ app.get('/api/ping', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-app.get('/api/debug-schema', async (req, res) => {
-  if (req.headers['x-admin-key'] !== process.env.ADMIN_KEY) return res.sendStatus(401);
-  try {
-    const cols = await db.query(
-      `SELECT column_name, data_type, column_default FROM information_schema.columns WHERE table_name = 'users' ORDER BY ordinal_position`
-    );
-    res.json(cols.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 
 const holdemWs = require('./websocket/holdem.ws');
 const trucoWs = require('./websocket/truco.ws');
