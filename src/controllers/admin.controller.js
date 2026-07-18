@@ -1,5 +1,6 @@
 const db = require('../models/db');
 const tournamentScheduler = require('../tournament/tournament.scheduler');
+const { issuePasswordResetLink } = require('./auth.controller');
 
 async function getStats(req, res) {
   try {
@@ -95,6 +96,19 @@ async function setRole(req, res) {
     if (!['user', 'admin'].includes(role)) return res.status(400).json({ error: 'Rol inválido' });
     await db.query('UPDATE users SET is_admin = $1 WHERE id = $2', [role === 'admin', req.params.id]);
     await logAction(req.user.id, 'set_role', 'user', req.params.id, { role }, req);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+async function resetPassword(req, res) {
+  try {
+    const user = await db.query('SELECT id, email FROM users WHERE id = $1', [req.params.id]);
+    if (!user.rows[0]) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    await issuePasswordResetLink(user.rows[0].id);
+    await logAction(req.user.id, 'reset_password', 'user', req.params.id, {}, req);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -268,7 +282,7 @@ async function cancelTournament(req, res) {
 }
 
 module.exports = {
-  getStats, getUsers, banUser, unbanUser, editBalance, setRole, updateEmail,
+  getStats, getUsers, banUser, unbanUser, editBalance, setRole, updateEmail, resetPassword,
   getDeposits, approveDeposit, rejectDeposit,
   getTables, closeTable,
   getTournament, startTournament, cancelTournament,

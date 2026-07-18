@@ -24,6 +24,7 @@ router.post('/users/:id/unban', validIdParam, c.unbanUser);
 router.put('/users/:id/balance', validIdParam, c.editBalance);
 router.put('/users/:id/role', validIdParam, c.setRole);
 router.put('/users/:id/email', validIdParam, c.updateEmail);
+router.post('/users/:id/reset-password', validIdParam, c.resetPassword);
 
 router.get('/deposits', c.getDeposits);
 router.post('/deposits/:id/approve', validIdParam, c.approveDeposit);
