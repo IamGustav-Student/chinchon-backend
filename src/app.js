@@ -52,7 +52,7 @@ app.get('/api/ping', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-app.get('/api/admin/debug-schema', async (req, res) => {
+app.get('/api/debug-schema', async (req, res) => {
   if (req.headers['x-admin-key'] !== process.env.ADMIN_KEY) return res.sendStatus(401);
   try {
     const cols = await db.query(
