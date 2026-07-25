@@ -44,8 +44,11 @@ async function createTable(req, res) {
 async function joinTable(req, res) {
   const table = trucoStore.get(req.params.id);
   if (!table) return res.status(404).json({ error: 'Mesa no encontrada' });
+
+  // Reconexión: el jugador ya está sentado, solo re-sincronizar por WS.
+  if (table.players.some(p => p.userId === req.user.id)) return res.json({ tableId: table.id });
+
   if (table.status !== 'waiting') return res.status(400).json({ error: 'La mesa ya está en juego' });
-  if (table.players.some(p => p.userId === req.user.id)) return res.status(400).json({ error: 'Ya estás en esta mesa' });
   if (table.players.length >= table.maxPlayers) return res.status(400).json({ error: 'Mesa llena' });
 
   try {

@@ -44,9 +44,14 @@ async function createTable(req, res) {
 async function joinTable(req, res) {
   const table = tableStore.get(req.params.id);
   if (!table) return res.status(404).json({ error: 'Mesa no encontrada' });
+
+  // Reconexión: el jugador ya está sentado (p.ej. volvió al lobby y le dio
+  // "Ver partida"). No hay nada que hacer del lado REST — el WS se encarga
+  // de re-sincronizar el estado al mandar join-table.
+  if (table.players.includes(req.user.id)) return res.json(table);
+
   if (table.status !== 'waiting') return res.status(400).json({ error: 'La mesa ya está en juego' });
   if (table.players.length >= table.maxPlayers) return res.status(400).json({ error: 'Mesa llena' });
-  if (table.players.includes(req.user.id)) return res.status(400).json({ error: 'Ya estás en esta mesa' });
 
   try {
     if (table.bet > 0) {

@@ -28,6 +28,8 @@ function initWebSocket(server) {
     connections.set(user.id, ws);
     ws.userId = user.id;
     ws.username = user.username;
+    ws.isAlive = true;
+    ws.on('pong', () => { ws.isAlive = true; });
 
     // Si el jugador tenía un timer de forfeit de torneo, cancelarlo al reconectar
     const { handleTournamentReconnect } = require('../tournament/tournament.scheduler');
@@ -48,6 +50,27 @@ function initWebSocket(server) {
       handleDisconnect(user.id);
     });
   });
+
+  // Heartbeat: sin esto, proxies intermediarios (Railway incluido) cierran
+  // conexiones WebSocket inactivas tras ~55-60s sin tráfico. En una partida
+  // de cartas con turnos lentos eso mata el WS en silencio — el cliente
+  // nunca se entera de que dejó de recibir game-state/your-turn y queda
+  // mostrando el turno "congelado". El ping cada 25s genera tráfico
+  // periódico y además limpia conexiones realmente muertas (que no
+  // respondieron al ping anterior).
+  const interval = setInterval(() => {
+    wss.clients.forEach((ws) => {
+      if (ws.isAlive === false) {
+        connections.delete(ws.userId);
+        handleDisconnect(ws.userId);
+        return ws.terminate();
+      }
+      ws.isAlive = false;
+      ws.ping();
+    });
+  }, 25000);
+
+  wss.on('close', () => clearInterval(interval));
 }
 
 function getTokenFromRequest(req) {
