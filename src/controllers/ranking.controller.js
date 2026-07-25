@@ -10,7 +10,8 @@ async function getWeeklyRanking(req, res) {
     );
     const nextReset = getNextMonday();
     res.json({ ranking: result.rows, nextReset });
-  } catch {
+  } catch (err) {
+    console.error('[getWeeklyRanking]', err.message);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 }
@@ -21,7 +22,8 @@ async function getAllTimeRanking(req, res) {
       `SELECT id, username, avatar, games_won FROM users ORDER BY games_won DESC LIMIT 50`
     );
     res.json(result.rows);
-  } catch {
+  } catch (err) {
+    console.error('[getAllTimeRanking]', err.message);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 }

@@ -19,7 +19,8 @@ async function getBalance(req, res) {
   try {
     const result = await db.query('SELECT balance FROM users WHERE id = $1', [req.user.id]);
     res.json({ balance: result.rows[0]?.balance ?? 0 });
-  } catch {
+  } catch (err) {
+    console.error('[getBalance]', err.message);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 }
@@ -56,7 +57,8 @@ async function deposit(req, res) {
       [req.user.id, amount]
     );
     res.json({ balance: result.rows[0].balance });
-  } catch {
+  } catch (err) {
+    console.error('[deposit]', err.message);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 }
@@ -77,7 +79,8 @@ async function withdraw(req, res) {
       [req.user.id, amount]
     );
     res.json({ balance: result.rows[0].balance });
-  } catch {
+  } catch (err) {
+    console.error('[withdraw]', err.message);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 }
@@ -90,7 +93,8 @@ async function getHistory(req, res) {
       [req.user.id]
     );
     res.json(result.rows);
-  } catch {
+  } catch (err) {
+    console.error('[getHistory]', err.message);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 }

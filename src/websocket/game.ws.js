@@ -37,7 +37,8 @@ function initWebSocket(server) {
       try {
         const msg = JSON.parse(raw);
         handleMessage(ws, user, msg);
-      } catch {
+      } catch (err) {
+        console.error('[ws message]', err.message);
         send(ws, { event: 'error', data: { message: 'Mensaje inválido' } });
       }
     });

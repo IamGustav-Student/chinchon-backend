@@ -35,7 +35,8 @@ async function createTable(req, res) {
       pointLimit: pointLimit || 100,
     });
     res.status(201).json(table);
-  } catch {
+  } catch (err) {
+    console.error('[createTable]', err.message);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 }
@@ -56,7 +57,8 @@ async function joinTable(req, res) {
     const avatarRow = await db.query('SELECT avatar FROM users WHERE id = $1', [req.user.id]);
     tableStore.addPlayer(table.id, req.user.id, req.user.username, avatarRow.rows[0]?.avatar);
     res.json(tableStore.get(table.id));
-  } catch {
+  } catch (err) {
+    console.error('[joinTable]', err.message);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 }

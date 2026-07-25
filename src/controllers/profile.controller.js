@@ -26,7 +26,8 @@ async function getProfile(req, res) {
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'Usuario no encontrado' });
     res.json(result.rows[0]);
-  } catch {
+  } catch (err) {
+    console.error('[getProfile]', err.message);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 }
@@ -88,7 +89,8 @@ async function updateProfile(req, res) {
       [avatar, bio, req.user.id]
     );
     res.json(result.rows[0]);
-  } catch {
+  } catch (err) {
+    console.error('[updateProfile]', err.message);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 }

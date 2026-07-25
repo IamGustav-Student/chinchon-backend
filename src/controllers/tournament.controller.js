@@ -183,7 +183,8 @@ async function getResult(req, res) {
       finalistPrize: Math.floor(r.prize_pool * 0.2),
       totalPlayers: r.total_players,
     });
-  } catch {
+  } catch (err) {
+    console.error('[getResult]', err.message);
     res.status(404).json({ error: 'Resultado no disponible' });
   }
 }
