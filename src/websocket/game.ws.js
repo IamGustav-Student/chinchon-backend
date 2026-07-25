@@ -137,6 +137,7 @@ function startGame(table) {
     discard: [firstDiscard],
     hands,
     currentTurn: table.players[0],
+    hasDrawn: {},
     scores: Object.fromEntries(table.players.map(id => [id, 0])),
     round: 1,
   });
@@ -175,7 +176,7 @@ function handleDrawCard(ws, user, { tableId, source }) {
   const table = tableStore.get(tableId);
   if (!table || table.status !== 'playing') return;
   if (table.currentTurn !== user.id) return send(ws, { event: 'error', data: { message: 'No es tu turno' } });
-  if (ws.hasDrawn) return send(ws, { event: 'error', data: { message: 'Ya robaste carta' } });
+  if (table.hasDrawn[user.id]) return send(ws, { event: 'error', data: { message: 'Ya robaste carta' } });
 
   let card;
   let updatedDeck = [...table.deck];
@@ -200,9 +201,9 @@ function handleDrawCard(ws, user, { tableId, source }) {
     deck: updatedDeck,
     discard: updatedDiscard,
     hands: { ...table.hands, [user.id]: updatedHand },
+    hasDrawn: { ...table.hasDrawn, [user.id]: true },
   });
 
-  ws.hasDrawn = true;
   send(ws, { event: 'card-drawn', data: { card, hand: updatedHand } });
   broadcast(updated, { event: 'card-drawn', data: { playerId: user.id, source } }, user.id);
 }
@@ -211,7 +212,7 @@ function handleDiscardCard(ws, user, { tableId, cardIndex }) {
   const table = tableStore.get(tableId);
   if (!table || table.status !== 'playing') return;
   if (table.currentTurn !== user.id) return send(ws, { event: 'error', data: { message: 'No es tu turno' } });
-  if (!ws.hasDrawn) return send(ws, { event: 'error', data: { message: 'Debes robar antes de descartar' } });
+  if (!table.hasDrawn[user.id]) return send(ws, { event: 'error', data: { message: 'Debes robar antes de descartar' } });
 
   const hand = [...table.hands[user.id]];
   if (cardIndex < 0 || cardIndex >= hand.length) return send(ws, { event: 'error', data: { message: 'Índice inválido' } });
@@ -224,10 +225,13 @@ function handleDiscardCard(ws, user, { tableId, cardIndex }) {
     discard: updatedDiscard,
     hands: { ...table.hands, [user.id]: hand },
     currentTurn: nextTurn,
+    hasDrawn: { ...table.hasDrawn, [user.id]: false },
   });
 
-  ws.hasDrawn = false;
-  broadcast(updated, { event: 'card-discarded', data: { playerId: user.id, card: discarded } });
+  // BUG PRINCIPAL: antes no se mandaba currentTurn acá — el frontend nunca
+  // se enteraba de que el turno avanzó y quedaba "congelado" en el jugador
+  // que tenía el turno al arrancar la ronda (siempre el creador de la mesa).
+  broadcast(updated, { event: 'card-discarded', data: { playerId: user.id, card: discarded, currentTurn: nextTurn } });
   notifyTurn(updated);
 }
 
@@ -235,7 +239,7 @@ function handleDeclareChinchon(ws, user, { tableId }) {
   const table = tableStore.get(tableId);
   if (!table || table.status !== 'playing') return;
   if (table.currentTurn !== user.id) return send(ws, { event: 'error', data: { message: 'No es tu turno' } });
-  if (!ws.hasDrawn) return send(ws, { event: 'error', data: { message: 'Debes robar primero' } });
+  if (!table.hasDrawn[user.id]) return send(ws, { event: 'error', data: { message: 'Debes robar primero' } });
 
   const hand = table.hands[user.id];
   if (!engine.validateChinchon(hand)) {
@@ -257,7 +261,7 @@ function handleCut(ws, user, { tableId }) {
   const table = tableStore.get(tableId);
   if (!table || table.status !== 'playing') return;
   if (table.currentTurn !== user.id) return send(ws, { event: 'error', data: { message: 'No es tu turno' } });
-  if (!ws.hasDrawn) return send(ws, { event: 'error', data: { message: 'Debes robar primero' } });
+  if (!table.hasDrawn[user.id]) return send(ws, { event: 'error', data: { message: 'Debes robar primero' } });
 
   const hand = table.hands[user.id];
   const result = engine.validateClose(hand);
@@ -306,6 +310,7 @@ function startNewRound(table, players, scores) {
     discard: [firstDiscard],
     hands,
     currentTurn: players[0],
+    hasDrawn: {},
     scores,
     round: table.round + 1,
   });

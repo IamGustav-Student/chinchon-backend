@@ -17,6 +17,7 @@ function create({ id, creatorId, creatorName, creatorAvatar, bet, maxPlayers, po
     discard: [],
     hands: {},
     currentTurn: null,
+    hasDrawn: {},
     scores: {},
     round: 0,
   };
